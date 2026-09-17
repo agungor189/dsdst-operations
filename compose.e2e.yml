@@ -1,0 +1,76 @@
+services:
+  dsdst-panel:
+    environment:
+      NODE_ENV: test
+      E2E_ALLOW_SEED: "true"
+      E2E_WAREHOUSE_API_KEY: ${E2E_WAREHOUSE_API_KEY:?E2E_WAREHOUSE_API_KEY is required}
+      WAREHOUSE_PRINT_DRY_RUN: "true"
+      WAREHOUSE_PRINT_WORKER_INTERVAL_MS: 500
+    command:
+      - sh
+      - -ec
+      - node node_modules/tsx/dist/cli.mjs scripts/seedOperationsE2E.ts && exec node node_modules/tsx/dist/cli.mjs server.ts
+    ports: !reset []
+
+  dsdst-warehouse:
+    environment:
+      NODE_ENV: test
+      COOKIE_SECURE: "false"
+      WAREHOUSE_API_KEY: ${E2E_WAREHOUSE_API_KEY:?E2E_WAREHOUSE_API_KEY is required}
+    ports: !reset []
+
+  dsdst-kit-studio:
+    environment:
+      NODE_ENV: test
+      PANEL_API_KEY: ${E2E_WAREHOUSE_API_KEY:?E2E_WAREHOUSE_API_KEY is required}
+      ALLOWED_ORIGINS: http://dsdst-kit-studio:3012
+    ports: !reset []
+
+  label-printer:
+    environment:
+      NODE_ENV: test
+      COOKIE_SECURE: "false"
+    ports: !reset []
+
+  warehouse-label-renderer:
+    environment:
+      NODE_ENV: test
+
+  operations-e2e:
+    image: node:22-alpine
+    depends_on:
+      dsdst-panel:
+        condition: service_healthy
+      dsdst-warehouse:
+        condition: service_healthy
+      dsdst-kit-studio:
+        condition: service_healthy
+      label-printer:
+        condition: service_healthy
+      warehouse-label-renderer:
+        condition: service_healthy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    volumes:
+      - ./tests:/tests:ro
+    environment:
+      PANEL_URL: http://dsdst-panel:3000
+      WAREHOUSE_URL: http://dsdst-warehouse:3006
+      LABEL_PRINTER_URL: http://label-printer:3000
+      KIT_STUDIO_URL: http://dsdst-kit-studio:3012
+    command: ["node", "--test", "/tests/operations.e2e.mjs"]
+    networks:
+      - internal
+
+networks:
+  edge:
+    name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}-edge
+  internal:
+    name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}-internal
+    internal: true
+

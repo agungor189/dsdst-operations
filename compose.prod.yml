@@ -1,0 +1,203 @@
+name: dsdst-operations
+
+x-security: &security
+  read_only: true
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+services:
+  dsdst-panel:
+    image: ${PANEL_IMAGE:-dsdst-panel:local}
+    build:
+      context: ${PANEL_CONTEXT:-../panel-kit-yonetimi}
+    restart: unless-stopped
+    <<: *security
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${PANEL_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_PATH: /data/dsdst_panel.db
+      BACKUP_DIR: /backups
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      ENCRYPTION_SECRET: ${ENCRYPTION_SECRET:?ENCRYPTION_SECRET is required}
+      PANEL_API_HASH_SECRET: ${PANEL_API_HASH_SECRET:?PANEL_API_HASH_SECRET is required}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      ALLOWED_ORIGINS: ${PANEL_ALLOWED_ORIGINS:-}
+      LABEL_RENDERER_URL: http://warehouse-label-renderer:3010
+      LABEL_RENDERER_API_KEY: ${LABEL_RENDERER_API_KEY:?LABEL_RENDERER_API_KEY is required}
+      WAREHOUSE_PRINTER_NAME: ${WAREHOUSE_PRINTER_NAME:-}
+      WAREHOUSE_PRINT_DRY_RUN: ${WAREHOUSE_PRINT_DRY_RUN:-false}
+      CUPS_SERVER: ${CUPS_SERVER:-}
+      CLOUD_BACKUP_ENABLED: ${CLOUD_BACKUP_ENABLED:-false}
+      CLOUD_BACKUP_PROVIDER: ${CLOUD_BACKUP_PROVIDER:-cloudflare-r2}
+      CLOUD_BACKUP_RCLONE_REMOTE: ${CLOUD_BACKUP_RCLONE_REMOTE:-}
+      CLOUD_BACKUP_PREFIX: ${CLOUD_BACKUP_PREFIX:-production}
+      CLOUD_BACKUP_RETENTION_DAYS: ${CLOUD_BACKUP_RETENTION_DAYS:-30}
+      CLOUD_BACKUP_TIMEOUT_SECONDS: ${CLOUD_BACKUP_TIMEOUT_SECONDS:-900}
+      RCLONE_CONFIG_DSDSTR2_TYPE: ${RCLONE_CONFIG_DSDSTR2_TYPE:-}
+      RCLONE_CONFIG_DSDSTR2_PROVIDER: ${RCLONE_CONFIG_DSDSTR2_PROVIDER:-}
+      RCLONE_CONFIG_DSDSTR2_ACCESS_KEY_ID: ${RCLONE_CONFIG_DSDSTR2_ACCESS_KEY_ID:-}
+      RCLONE_CONFIG_DSDSTR2_SECRET_ACCESS_KEY: ${RCLONE_CONFIG_DSDSTR2_SECRET_ACCESS_KEY:-}
+      RCLONE_CONFIG_DSDSTR2_ENDPOINT: ${RCLONE_CONFIG_DSDSTR2_ENDPOINT:-}
+    volumes:
+      - ${PANEL_DATA_DIR:-panel_data}:/data
+      - ${PANEL_UPLOADS_DIR:-panel_uploads}:/app/uploads
+      - ${PANEL_BACKUP_DIR:-./backups/panel}:/backups
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+    networks:
+      - edge
+      - internal
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/public/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  dsdst-warehouse:
+    image: ${WAREHOUSE_IMAGE:-dsdst-warehouse:local}
+    build:
+      context: ${WAREHOUSE_CONTEXT:-../Dsdst-Warehouse}
+    restart: unless-stopped
+    <<: *security
+    depends_on:
+      dsdst-panel:
+        condition: service_healthy
+      warehouse-label-renderer:
+        condition: service_healthy
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${WAREHOUSE_PORT:-3006}:3006"
+    environment:
+      NODE_ENV: production
+      PORT: 3006
+      PANEL_API_BASE_URL: http://dsdst-panel:3000
+      WAREHOUSE_API_KEY: ${WAREHOUSE_API_KEY:?WAREHOUSE_API_KEY is required}
+      LABEL_RENDERER_URL: http://warehouse-label-renderer:3010
+      LABEL_RENDERER_API_KEY: ${LABEL_RENDERER_API_KEY:?LABEL_RENDERER_API_KEY is required}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    networks:
+      - edge
+      - internal
+
+  dsdst-kit-studio:
+    image: ${KIT_STUDIO_IMAGE:-dsdst-kit-studio:local}
+    build:
+      context: ${KIT_STUDIO_CONTEXT:-../dsdst-kit-studio}
+    restart: unless-stopped
+    <<: *security
+    depends_on:
+      dsdst-panel:
+        condition: service_healthy
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${KIT_STUDIO_PORT:-3012}:3012"
+    environment:
+      NODE_ENV: production
+      PORT: 3012
+      DB_PATH: /data/dsdst-kit-studio.db
+      UPLOAD_DIR: /app/uploads
+      PANEL_API_URL: http://dsdst-panel:3000
+      PANEL_API_KEY: ${KIT_STUDIO_API_KEY:?KIT_STUDIO_API_KEY is required}
+      ALLOWED_ORIGINS: ${KIT_STUDIO_ALLOWED_ORIGINS:-http://localhost:3012}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+    volumes:
+      - ${KIT_STUDIO_DATA_DIR:-kit_studio_data}:/data
+      - ${KIT_STUDIO_UPLOADS_DIR:-kit_studio_uploads}:/app/uploads
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    networks:
+      - edge
+      - internal
+
+  label-printer:
+    image: ${LABEL_PRINTER_IMAGE:-label-printer:local}
+    build:
+      context: ${LABEL_PRINTER_CONTEXT:-../Label-Printer}
+    restart: unless-stopped
+    <<: *security
+    depends_on:
+      dsdst-panel:
+        condition: service_healthy
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${LABEL_PRINTER_PORT:-3013}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATA_DIR: /app/data
+      STATE_FILE: app-state.json
+      PANEL_API_URL: http://dsdst-panel:3000
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+    volumes:
+      - ${LABEL_PRINTER_DATA_DIR:-label_printer_data}:/app/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    networks:
+      - edge
+      - internal
+
+  warehouse-label-renderer:
+    image: ${LABEL_PRINTER_IMAGE:-label-printer:local}
+    build:
+      context: ${LABEL_PRINTER_CONTEXT:-../Label-Printer}
+    command: ["node", "warehouse-renderer.mjs"]
+    restart: unless-stopped
+    <<: *security
+    expose:
+      - "3010"
+    environment:
+      NODE_ENV: production
+      LABEL_RENDERER_PORT: 3010
+      LABEL_RENDERER_API_KEY: ${LABEL_RENDERER_API_KEY:?LABEL_RENDERER_API_KEY is required}
+      DATA_DIR: /app/data
+      STATE_FILE: app-state.json
+    volumes:
+      - ${LABEL_PRINTER_DATA_DIR:-label_printer_data}:/app/data:ro
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3010/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  operations-toolbox:
+    image: alpine:3.20
+    profiles: ["tools"]
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - ${PANEL_UPLOADS_DIR:-panel_uploads}:/sources/panel-uploads:ro
+      - ${KIT_STUDIO_DATA_DIR:-kit_studio_data}:/sources/kit-data:ro
+      - ${KIT_STUDIO_UPLOADS_DIR:-kit_studio_uploads}:/sources/kit-uploads:ro
+      - ${LABEL_PRINTER_DATA_DIR:-label_printer_data}:/sources/labels:ro
+      - ${OPERATIONS_BACKUP_DIR:-./backups}:/backups
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    command: ["true"]
+
+volumes:
+  panel_data:
+  panel_uploads:
+  kit_studio_data:
+  kit_studio_uploads:
+  label_printer_data:
+
+networks:
+  edge:
+    name: dsdst-edge
+  internal:
+    name: dsdst-internal
+    internal: true

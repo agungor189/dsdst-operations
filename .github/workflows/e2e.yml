@@ -1,0 +1,36 @@
+name: Operations E2E
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  operations-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: dsdst-operations
+      - uses: actions/checkout@v4
+        with:
+          repository: agungor189/panel-kit-yonetimi
+          path: panel-kit-yonetimi
+      - uses: actions/checkout@v4
+        with:
+          repository: agungor189/Dsdst-Warehouse
+          path: Dsdst-Warehouse
+      - uses: actions/checkout@v4
+        with:
+          repository: agungor189/dsdst-kit-studio
+          path: dsdst-kit-studio
+      - uses: actions/checkout@v4
+        with:
+          repository: agungor189/Label-Printer
+          path: Label-Printer
+      - name: Run isolated system workflow
+        working-directory: dsdst-operations
+        run: ./scripts/e2e.sh
+

@@ -1,0 +1,257 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+const panelUrl = process.env.PANEL_URL || "http://dsdst-panel:3000";
+const warehouseUrl = process.env.WAREHOUSE_URL || "http://dsdst-warehouse:3006";
+const labelPrinterUrl = process.env.LABEL_PRINTER_URL || "http://label-printer:3000";
+const kitStudioUrl = process.env.KIT_STUDIO_URL || "http://dsdst-kit-studio:3012";
+
+const request = async (base, path, { method = "GET", body, token, cookie, expect = 200 } = {}) => {
+  const response = await fetch(`${base}${path}`, {
+    method,
+    headers: {
+      Accept: "application/json, application/pdf",
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(cookie ? { Cookie: cookie } : {}),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+  const contentType = response.headers.get("content-type") || "";
+  const payload = contentType.includes("application/json") ? await response.json() : Buffer.from(await response.arrayBuffer());
+  assert.equal(response.status, expect, `${method} ${path} -> ${response.status}: ${Buffer.isBuffer(payload) ? payload.toString("utf8", 0, 300) : JSON.stringify(payload)}`);
+  return { response, payload };
+};
+
+const sessionCookie = (response) => {
+  const raw = response.headers.get("set-cookie") || "";
+  assert.ok(raw, "login response must set an HttpOnly session cookie");
+  const cookie = raw.split(";", 1)[0];
+  assert.ok(/HttpOnly/i.test(raw), "session cookie must be HttpOnly");
+  return cookie;
+};
+
+const waitFor = async (description, fn, timeoutMs = 20_000) => {
+  const deadline = Date.now() + timeoutMs;
+  let last;
+  while (Date.now() < deadline) {
+    last = await fn();
+    if (last) return last;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  assert.fail(`${description} timed out; last value: ${JSON.stringify(last)}`);
+};
+
+const template = (id, marker) => ({
+  id,
+  name: `Operations ${marker}`,
+  purpose: "goods_receipt",
+  isDefault: true,
+  width: 100,
+  height: 60,
+  elements: [
+    { id: "marker", type: "text", x: 4, y: 4, width: 92, height: 8, value: `${marker} {SKU}`, fontSize: 4, fontWeight: "bold" },
+    { id: "barcode", type: "barcode", x: 4, y: 18, width: 65, height: 26, value: "{Package_code}", showBarcodeText: true },
+    { id: "qr", type: "qr", x: 73, y: 18, width: 23, height: 23, value: "{Package_code}" },
+  ],
+});
+
+test("DSDST Operations receiving, live template and picking workflow", async () => {
+  await request(panelUrl, "/api/public/health");
+  await request(warehouseUrl, "/health");
+  await request(labelPrinterUrl, "/api/health");
+  await request(kitStudioUrl, "/api/health");
+
+  const initialLogin = await request(panelUrl, "/api/auth/login", {
+    method: "POST",
+    body: { username: "admin", password: "admin" },
+  });
+  const initialToken = initialLogin.payload.token;
+  assert.ok(initialToken);
+  if (initialLogin.payload.user.must_change_password) {
+    await request(panelUrl, "/api/auth/change-password", {
+      method: "POST",
+      token: initialToken,
+      body: { current_password: "admin", new_password: "Operations-E2E-2026!" },
+    });
+  }
+  const panelLogin = await request(panelUrl, "/api/auth/login", {
+    method: "POST",
+    body: { username: "admin", password: "Operations-E2E-2026!" },
+  });
+  const panelToken = panelLogin.payload.token;
+
+  const labelLogin = await request(labelPrinterUrl, "/api/auth/login", {
+    method: "POST",
+    body: { username: "admin", password: "Operations-E2E-2026!" },
+  });
+  const labelCookie = sessionCookie(labelLogin.response);
+  const warehouseLogin = await request(warehouseUrl, "/api/auth/login", {
+    method: "POST",
+    body: { username: "admin", password: "Operations-E2E-2026!" },
+  });
+  const warehouseCookie = sessionCookie(warehouseLogin.response);
+
+  const sku = `OPS-${Date.now()}`;
+  const supplierCode = `SUP-${Date.now()}`;
+  const lot = `LOT-${Date.now()}`;
+  const headers = ["SKU", "Tedarik NO", "İsim - TR", "TÜR", "Lot Adedi", "Kutu sayısı", "Kutu içi adet", "Kutu Ağırlığı", "Parti/Lot", "Parça Ağırlığı"];
+  const row = {
+    SKU: sku,
+    "Tedarik NO": supplierCode,
+    "İsim - TR": "Operations Dirsek",
+    "TÜR": "simple",
+    "Lot Adedi": "10",
+    "Kutu sayısı": "2",
+    "Kutu içi adet": "5",
+    "Kutu Ağırlığı": "0.64",
+    "Parti/Lot": lot,
+    "Parça Ağırlığı": "127.3",
+  };
+  const imported = await request(panelUrl, "/api/products/import", {
+    method: "POST",
+    token: panelToken,
+    body: { headers, rows: [row], dry_run: false, source_name: "operations-e2e.csv" },
+  });
+  assert.equal(imported.payload.applied, true);
+
+  const products = await request(panelUrl, "/api/products", { token: panelToken });
+  const product = products.payload.find((candidate) => candidate.sku === sku);
+  assert.ok(product, "imported product must be discoverable through the Panel product API");
+  assert.equal(Number(product.central_stock), 0, "lot import must not pre-receive physical stock");
+
+  const createdLocation = await request(warehouseUrl, "/api/admin/locations", {
+    method: "POST",
+    cookie: warehouseCookie,
+    body: { code: "Z9-K1-P1", package_capacity: 4, purpose: "PICK" },
+    expect: 201,
+  });
+  assert.equal(createdLocation.payload.data.code, "Z9-K1-P1");
+
+  await request(warehouseUrl, "/api/admin/layouts/import-legacy", {
+    method: "POST",
+    cookie: warehouseCookie,
+    body: {
+      warehouseConfig: { name: "Operations E2E", width: 6, length: 4, height: 3 },
+      objects: [{ id: "rack-z9", type: "rack", name: "Z9", rackCode: "Z9", x: 0, z: 0, width: 2, depth: 1, height: 2, shelfCount: 1, binsPerShelf: 1 }],
+    },
+    expect: 201,
+  });
+
+  const csvText = `sku,pick_face_location,reserve_locations\n${sku},Z9-K1-P1,\n`;
+  const layoutPreview = await request(warehouseUrl, "/api/admin/layouts/placement/preview", {
+    method: "POST",
+    cookie: warehouseCookie,
+    body: { source_filename: "operations-e2e-layout.csv", csv_text: csvText },
+  });
+  assert.equal(layoutPreview.payload.data.valid, true);
+  await request(warehouseUrl, "/api/admin/layouts/placement/apply", {
+    method: "POST",
+    cookie: warehouseCookie,
+    body: {
+      source_filename: "operations-e2e-layout.csv",
+      csv_text: csvText,
+      preview_hash: layoutPreview.payload.data.preview_hash,
+      notes: "isolated operations e2e",
+    },
+    expect: 201,
+  });
+
+  const receiving = await request(warehouseUrl, "/api/admin/receiving/sessions", {
+    method: "POST",
+    cookie: warehouseCookie,
+    body: { lot_number: lot, supplier_code: supplierCode, device_id: "operations-e2e" },
+    expect: 201,
+  });
+  const receivingId = receiving.payload.data.id;
+  const claimed = await request(warehouseUrl, "/api/admin/packages/claim-next", {
+    method: "POST",
+    cookie: warehouseCookie,
+    body: { supplier_code: supplierCode, session_id: receivingId, device_id: "operations-e2e" },
+  });
+  const pkg = claimed.payload.data;
+  assert.equal(pkg.package_number, 1);
+
+  const currentState = await request(labelPrinterUrl, "/api/state", { cookie: labelCookie });
+  const v1 = template("operations-goods-receipt-v1", "LIVE-V1");
+  await request(labelPrinterUrl, "/api/state", {
+    method: "PUT",
+    cookie: labelCookie,
+    body: { ...currentState.payload, template: v1, templates: [v1] },
+  });
+  const previewBody = { purpose: "goods_receipt", data: { SKU: sku, Package_code: pkg.package_code, Paket_no: "1 / 2", Malzeme: "Alüminyum" } };
+  const previewV1 = await request(warehouseUrl, "/api/labels/preview", { method: "POST", cookie: warehouseCookie, body: previewBody });
+  assert.equal(previewV1.response.headers.get("x-label-template-id"), v1.id);
+  assert.equal(previewV1.payload.subarray(0, 4).toString(), "%PDF");
+
+  const v2 = template("operations-goods-receipt-v2", "LIVE-V2");
+  await request(labelPrinterUrl, "/api/state", {
+    method: "PUT",
+    cookie: labelCookie,
+    body: { ...currentState.payload, template: v2, templates: [v1, v2] },
+  });
+  const previewV2 = await request(warehouseUrl, "/api/labels/preview", { method: "POST", cookie: warehouseCookie, body: previewBody });
+  assert.equal(previewV2.response.headers.get("x-label-template-id"), v2.id);
+  assert.notEqual(previewV2.response.headers.get("x-label-template-id"), previewV1.response.headers.get("x-label-template-id"));
+
+  const queued = await request(warehouseUrl, `/api/admin/packages/${pkg.id}/print`, {
+    method: "POST",
+    cookie: warehouseCookie,
+    body: { claim_token: pkg.claim_token, idempotency_key: `print-${pkg.id}`, device_id: "operations-e2e" },
+  });
+  const printJobId = queued.payload.data.job.id;
+  await waitFor("dry-run print job", async () => {
+    const jobs = await request(warehouseUrl, "/api/admin/print-jobs", { cookie: warehouseCookie });
+    return jobs.payload.data.find((job) => job.id === printJobId && job.status === "PRINTED");
+  });
+
+  await request(warehouseUrl, "/api/admin/placements", {
+    method: "POST",
+    cookie: warehouseCookie,
+    body: { package_code: pkg.package_code, location_code: "Z9-K1-P1", idempotency_key: `place-${pkg.id}`, device_id: "operations-e2e" },
+  });
+  const afterReceiptProducts = await request(panelUrl, "/api/products", { token: panelToken });
+  const stockAfterReceipt = Number(afterReceiptProducts.payload.find((candidate) => candidate.id === product.id).central_stock);
+  assert.equal(stockAfterReceipt, 5, "placing one package must increase central stock by its package quantity");
+
+  const accounts = await request(panelUrl, "/api/cash-accounts", { token: panelToken });
+  const cashAccount = accounts.payload.find((account) => account.is_active !== 0 && account.type === "cash") || accounts.payload[0];
+  assert.ok(cashAccount);
+  const sale = await request(panelUrl, "/api/sales", {
+    method: "POST",
+    token: panelToken,
+    body: {
+      customer_name: "Operations E2E",
+      total_quantity: 1,
+      total_weight: 0.1273,
+      total_amount: 100,
+      platform: "Satış Sistemi",
+      cash_account_id: cashAccount.id,
+      items: [{ product_id: product.id, product_name: "Operations Dirsek", quantity: 1, price: 100, weight: 0.1273 }],
+    },
+  });
+  assert.ok(sale.payload.id);
+
+  const orders = await request(warehouseUrl, "/api/orders", { cookie: warehouseCookie });
+  const order = orders.payload.data.find((candidate) => candidate.id === sale.payload.id);
+  assert.ok(order, "new sale must appear in the Warehouse picking queue");
+  await request(warehouseUrl, `/api/orders/${order.id}/start`, { method: "POST", cookie: warehouseCookie, body: {} });
+  const plan = await request(warehouseUrl, `/api/orders/${order.id}/pick-plan`, { cookie: warehouseCookie });
+  const pickItem = plan.payload.data.items.find((candidate) => candidate.product_id === product.id);
+  assert.ok(pickItem);
+  await request(warehouseUrl, `/api/orders/${order.id}/verify-pick`, {
+    method: "POST",
+    cookie: warehouseCookie,
+    body: { product_id: product.id, code: sku },
+  });
+  await request(warehouseUrl, `/api/orders/${order.id}/pick-items/${product.id}/complete`, {
+    method: "POST",
+    cookie: warehouseCookie,
+    body: { picked_quantity: 1 },
+  });
+  await request(warehouseUrl, `/api/orders/${order.id}/complete`, { method: "POST", cookie: warehouseCookie, body: { note: "operations e2e" } });
+
+  const afterPickProducts = await request(panelUrl, "/api/products", { token: panelToken });
+  const stockAfterPick = Number(afterPickProducts.payload.find((candidate) => candidate.id === product.id).central_stock);
+  assert.ok(stockAfterPick < stockAfterReceipt, `stock must decrease after sale/pick (${stockAfterReceipt} -> ${stockAfterPick})`);
+});
