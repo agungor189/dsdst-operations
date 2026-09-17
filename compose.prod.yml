@@ -85,6 +85,12 @@ services:
     networks:
       - edge
       - internal
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3006/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
 
   dsdst-kit-studio:
     image: ${KIT_STUDIO_IMAGE:-dsdst-kit-studio:local}
@@ -114,6 +120,12 @@ services:
     networks:
       - edge
       - internal
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3012/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   label-printer:
     image: ${LABEL_PRINTER_IMAGE:-label-printer:local}
@@ -141,6 +153,12 @@ services:
     networks:
       - edge
       - internal
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   warehouse-label-renderer:
     image: ${LABEL_PRINTER_IMAGE:-label-printer:local}
@@ -191,6 +209,7 @@ services:
 volumes:
   panel_data:
   panel_uploads:
+  panel_backups:
   kit_studio_data:
   kit_studio_uploads:
   label_printer_data:

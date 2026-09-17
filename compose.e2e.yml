@@ -13,27 +13,27 @@ services:
 
   dsdst-warehouse:
     environment:
-      NODE_ENV: test
+      NODE_ENV: production
       COOKIE_SECURE: "false"
       WAREHOUSE_API_KEY: ${E2E_WAREHOUSE_API_KEY:?E2E_WAREHOUSE_API_KEY is required}
     ports: !reset []
 
   dsdst-kit-studio:
     environment:
-      NODE_ENV: test
+      NODE_ENV: production
       PANEL_API_KEY: ${E2E_WAREHOUSE_API_KEY:?E2E_WAREHOUSE_API_KEY is required}
       ALLOWED_ORIGINS: http://dsdst-kit-studio:3012
     ports: !reset []
 
   label-printer:
     environment:
-      NODE_ENV: test
+      NODE_ENV: production
       COOKIE_SECURE: "false"
     ports: !reset []
 
   warehouse-label-renderer:
     environment:
-      NODE_ENV: test
+      NODE_ENV: production
 
   operations-e2e:
     image: node:22-alpine

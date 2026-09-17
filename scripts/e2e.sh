@@ -27,13 +27,11 @@ E2E_WAREHOUSE_API_KEY=operations-e2e-api-key-not-production
 WAREHOUSE_API_KEY=operations-e2e-api-key-not-production
 KIT_STUDIO_API_KEY=operations-e2e-api-key-not-production
 LABEL_RENDERER_API_KEY=operations-e2e-renderer-key-not-production
-PANEL_BACKUP_DIR=$RUNTIME_DIR/panel-backups
+PANEL_BACKUP_DIR=panel_backups
 COOKIE_SECURE=false
 TRUST_PROXY_HOPS=0
 WAREHOUSE_PRINT_DRY_RUN=true
 EOF
-mkdir -p "$RUNTIME_DIR/panel-backups"
-
 docker compose --project-name "$PROJECT_NAME" --env-file "$ENV_FILE" \
   -f "$ROOT_DIR/compose.prod.yml" -f "$ROOT_DIR/compose.e2e.yml" \
   up --build --abort-on-container-exit --exit-code-from operations-e2e operations-e2e
