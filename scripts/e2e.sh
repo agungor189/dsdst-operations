@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT_DIR=$(CDPATH='' && cd -- "$(dirname -- "$0")/.." && pwd)
 RUNTIME_DIR=$(mktemp -d "${TMPDIR:-/tmp}/dsdst-e2e.XXXXXX")
 PROJECT_NAME="dsdst-e2e-$$"
 ENV_FILE="$RUNTIME_DIR/e2e.env"

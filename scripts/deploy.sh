@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT_DIR=$(CDPATH='' && cd -- "$(dirname -- "$0")/.." && pwd)
 COMPOSE_FILE="$ROOT_DIR/compose.prod.yml"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env}"
 

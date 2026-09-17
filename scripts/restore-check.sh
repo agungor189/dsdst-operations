@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT_DIR=$(CDPATH='' && cd -- "$(dirname -- "$0")/.." && pwd)
 COMPOSE_FILE="$ROOT_DIR/compose.prod.yml"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env}"
 DB_BACKUP=${1:-}
@@ -33,4 +33,3 @@ docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile tools run --r
   operations-toolbox sh -c "tar -tzf /backups/$(basename "$DATA_ARCHIVE") >/dev/null"
 echo "Archive integrity: ok"
 echo "Restore check completed without changing production data."
-

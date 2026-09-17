@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT_DIR=$(CDPATH='' && cd -- "$(dirname -- "$0")/.." && pwd)
 PANEL_REPO=${PANEL_CONTEXT:-$ROOT_DIR/../panel-kit-yonetimi}
 WAREHOUSE_REPO=${WAREHOUSE_CONTEXT:-$ROOT_DIR/../Dsdst-Warehouse}
 KIT_REPO=${KIT_STUDIO_CONTEXT:-$ROOT_DIR/../dsdst-kit-studio}
