@@ -61,7 +61,7 @@ mkdir -p "$RUNTIME_DIR/panel-backups" "$RUNTIME_DIR/kit-uploads" "$RUNTIME_DIR/l
   "$NODE24_BIN" warehouse-renderer.mjs) >"$RUNTIME_DIR/renderer.log" 2>&1 &
 PIDS="$PIDS $!"
 
-(cd "$PANEL_REPO" && exec env NODE_ENV=test PORT="$PANEL_PORT" DB_PATH="$RUNTIME_DIR/panel.db" \
+(cd "$PANEL_REPO" && exec env NODE_ENV=production PORT="$PANEL_PORT" DB_PATH="$RUNTIME_DIR/panel.db" \
   BACKUP_DIR="$RUNTIME_DIR/panel-backups" JWT_SECRET=operations-e2e-jwt-secret-not-production \
   ENCRYPTION_SECRET=operations-e2e-encryption-not-production \
   PANEL_API_HASH_SECRET=operations-e2e-hash-secret-not-production \

@@ -1,15 +1,14 @@
 services:
   dsdst-panel:
     environment:
-      NODE_ENV: test
-      E2E_ALLOW_SEED: "true"
+      NODE_ENV: production
       E2E_WAREHOUSE_API_KEY: ${E2E_WAREHOUSE_API_KEY:?E2E_WAREHOUSE_API_KEY is required}
       WAREHOUSE_PRINT_DRY_RUN: "true"
       WAREHOUSE_PRINT_WORKER_INTERVAL_MS: 500
     command:
       - sh
       - -ec
-      - node node_modules/tsx/dist/cli.mjs scripts/seedOperationsE2E.ts && exec node node_modules/tsx/dist/cli.mjs server.ts
+      - NODE_ENV=test E2E_ALLOW_SEED=true node node_modules/tsx/dist/cli.mjs scripts/seedOperationsE2E.ts && exec env NODE_ENV=production node node_modules/tsx/dist/cli.mjs server.ts
     ports: !reset []
 
   dsdst-warehouse:
@@ -73,4 +72,3 @@ networks:
   internal:
     name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}-internal
     internal: true
-
