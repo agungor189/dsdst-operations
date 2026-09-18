@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { randomUUID } from "node:crypto";
 
 const panelUrl = process.env.PANEL_URL || "http://dsdst-panel:3000";
 const warehouseUrl = process.env.WAREHOUSE_URL || "http://dsdst-warehouse:3006";
 const labelPrinterUrl = process.env.LABEL_PRINTER_URL || "http://label-printer:3000";
 const kitStudioUrl = process.env.KIT_STUDIO_URL || "http://dsdst-kit-studio:3012";
+const customerHubUrl = process.env.CUSTOMER_HUB_URL || "http://dsdst-customer-hub:3100";
 
 const request = async (base, path, { method = "GET", body, token, cookie, expect = 200 } = {}) => {
   const response = await fetch(`${base}${path}`, {
@@ -61,6 +63,9 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
   await request(warehouseUrl, "/health");
   await request(labelPrinterUrl, "/api/health");
   await request(kitStudioUrl, "/api/health");
+  const customerHubHealth = await request(customerHubUrl, "/api/health");
+  assert.equal(customerHubHealth.payload.database, "ok");
+  assert.equal(customerHubHealth.payload.worker, "ok");
 
   const initialLogin = await request(panelUrl, "/api/auth/login", {
     method: "POST",
@@ -80,6 +85,77 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
     body: { username: "admin", password: "Operations-E2E-2026!" },
   });
   const panelToken = panelLogin.payload.token;
+
+  const customerHubLogin = await request(customerHubUrl, "/api/auth/login", {
+    method: "POST",
+    body: { username: "admin", password: "Operations-E2E-2026!" },
+  });
+  const customerHubCookie = sessionCookie(customerHubLogin.response);
+  assert.equal(customerHubLogin.payload.user.id, panelLogin.payload.user.id, "Customer Hub session must use the Panel user");
+
+  const hubMarker = `hub-${Date.now()}`;
+  const inbound = {
+    event_id: `${hubMarker}-event`,
+    external_account_id: "website",
+    external_conversation_id: `${hubMarker}-conversation`,
+    external_message_id: `${hubMarker}-message`,
+    external_user_id: `${hubMarker}-visitor`,
+    display_name: "Operations Hub Customer",
+    body: `Operations inbound ${hubMarker}`,
+    message_type: "TEXT",
+    metadata: { source: "operations-e2e" },
+  };
+  const acceptedInbound = await request(customerHubUrl, "/api/dev/mock/inbound", {
+    method: "POST",
+    cookie: customerHubCookie,
+    body: inbound,
+    expect: 202,
+  });
+  assert.equal(acceptedInbound.payload.duplicate, false);
+  const duplicateInbound = await request(customerHubUrl, "/api/dev/mock/inbound", {
+    method: "POST",
+    cookie: customerHubCookie,
+    body: inbound,
+    expect: 202,
+  });
+  assert.equal(duplicateInbound.payload.duplicate, true, "duplicate webhook event must be idempotent");
+
+  const hubInbox = await request(customerHubUrl, `/api/conversations?q=${encodeURIComponent(hubMarker)}`, { cookie: customerHubCookie });
+  assert.equal(hubInbox.payload.items.length, 1);
+  const hubConversation = hubInbox.payload.items[0];
+  assert.equal(hubConversation.last_message, inbound.body);
+
+  await request(customerHubUrl, `/api/conversations/${hubConversation.id}/assignment`, {
+    method: "PUT",
+    cookie: customerHubCookie,
+    body: { assigned_user_id: customerHubLogin.payload.user.id },
+  });
+  const hubTags = await request(customerHubUrl, "/api/tags", { cookie: customerHubCookie });
+  assert.ok(hubTags.payload.items.length > 0);
+  await request(customerHubUrl, `/api/conversations/${hubConversation.id}/tags/${hubTags.payload.items[0].id}`, {
+    method: "PUT",
+    cookie: customerHubCookie,
+  });
+  await request(customerHubUrl, `/api/conversations/${hubConversation.id}/notes`, {
+    method: "POST",
+    cookie: customerHubCookie,
+    body: { text: `Internal note ${hubMarker}` },
+    expect: 201,
+  });
+  const queuedReply = await request(customerHubUrl, `/api/conversations/${hubConversation.id}/replies`, {
+    method: "POST",
+    cookie: customerHubCookie,
+    body: { body: `Outbound reply ${hubMarker}`, client_message_id: randomUUID() },
+    expect: 202,
+  });
+  assert.equal(queuedReply.payload.status, "QUEUED");
+  const sentReply = await waitFor("Customer Hub outbound outbox", async () => {
+    const detail = await request(customerHubUrl, `/api/conversations/${hubConversation.id}`, { cookie: customerHubCookie });
+    return detail.payload.messages.find((message) => message.id === queuedReply.payload.id && message.status === "SENT") ? detail.payload : null;
+  });
+  assert.equal(sentReply.assigned_user_id, customerHubLogin.payload.user.id);
+  assert.ok(sentReply.tags.some((tag) => tag.id === hubTags.payload.items[0].id));
+  assert.ok(sentReply.notes.some((note) => note.text === `Internal note ${hubMarker}`));
 
   const labelLogin = await request(labelPrinterUrl, "/api/auth/login", {
     method: "POST",

@@ -30,7 +30,10 @@ jobs:
         with:
           repository: agungor189/Label-Printer
           path: Label-Printer
+      - uses: actions/checkout@v4
+        with:
+          repository: agungor189/dsdst-customer-hub
+          path: dsdst-customer-hub
       - name: Run isolated system workflow
         working-directory: dsdst-operations
         run: ./scripts/e2e.sh
-

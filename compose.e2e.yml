@@ -25,6 +25,14 @@ services:
       ALLOWED_ORIGINS: http://dsdst-kit-studio:3012
     ports: !reset []
 
+  dsdst-customer-hub:
+    environment:
+      NODE_ENV: test
+      APP_ORIGIN: http://dsdst-customer-hub:3100
+      SESSION_SECURE: "false"
+      MOCK_ADAPTERS_ENABLED: "true"
+    ports: !reset []
+
   label-printer:
     environment:
       NODE_ENV: production
@@ -44,6 +52,8 @@ services:
         condition: service_healthy
       dsdst-kit-studio:
         condition: service_healthy
+      dsdst-customer-hub:
+        condition: service_healthy
       label-printer:
         condition: service_healthy
       warehouse-label-renderer:
@@ -62,6 +72,7 @@ services:
       WAREHOUSE_URL: http://dsdst-warehouse:3006
       LABEL_PRINTER_URL: http://label-printer:3000
       KIT_STUDIO_URL: http://dsdst-kit-studio:3012
+      CUSTOMER_HUB_URL: http://dsdst-customer-hub:3100
     command: ["node", "--test", "/tests/operations.e2e.mjs"]
     networks:
       - internal

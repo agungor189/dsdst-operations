@@ -6,6 +6,7 @@ PANEL_REPO=${PANEL_CONTEXT:-$ROOT_DIR/../panel-kit-yonetimi}
 WAREHOUSE_REPO=${WAREHOUSE_CONTEXT:-$ROOT_DIR/../Dsdst-Warehouse}
 KIT_REPO=${KIT_STUDIO_CONTEXT:-$ROOT_DIR/../dsdst-kit-studio}
 LABEL_REPO=${LABEL_PRINTER_CONTEXT:-$ROOT_DIR/../Label-Printer}
+CUSTOMER_HUB_REPO=${CUSTOMER_HUB_CONTEXT:-$ROOT_DIR/../dsdst-customer-hub}
 RUNTIME_DIR=$(mktemp -d "${TMPDIR:-/tmp}/dsdst-e2e-local.XXXXXX")
 NODE24_BIN=${NODE24_BIN:-$(npx -y node@24 -p 'process.execPath')}
 KIT_NODE_BIN=${KIT_NODE_BIN:-$(command -v node)}
@@ -15,6 +16,7 @@ WAREHOUSE_PORT=$((BASE_PORT + 1))
 LABEL_PORT=$((BASE_PORT + 2))
 RENDERER_PORT=$((BASE_PORT + 3))
 KIT_PORT=$((BASE_PORT + 4))
+CUSTOMER_HUB_PORT=$((BASE_PORT + 5))
 API_KEY=operations-e2e-api-key-not-production
 RENDERER_KEY=operations-e2e-renderer-key-not-production
 PIDS=""
@@ -47,7 +49,7 @@ wait_for() {
   return 1
 }
 
-mkdir -p "$RUNTIME_DIR/panel-backups" "$RUNTIME_DIR/kit-uploads" "$RUNTIME_DIR/label-data"
+mkdir -p "$RUNTIME_DIR/panel-backups" "$RUNTIME_DIR/kit-uploads" "$RUNTIME_DIR/label-data" "$RUNTIME_DIR/customer-hub-data/attachments"
 
 (cd "$PANEL_REPO" && exec env \
   NODE_ENV=test E2E_ALLOW_SEED=true DB_PATH="$RUNTIME_DIR/panel.db" \
@@ -73,6 +75,14 @@ PIDS="$PIDS $!"
 wait_for renderer "http://127.0.0.1:$RENDERER_PORT/health"
 wait_for panel "http://127.0.0.1:$PANEL_PORT/api/public/health"
 
+(cd "$CUSTOMER_HUB_REPO" && exec env NODE_ENV=test PORT="$CUSTOMER_HUB_PORT" \
+  DATABASE_PATH="$RUNTIME_DIR/customer-hub-data/customer-hub.db" ATTACHMENTS_DIR="$RUNTIME_DIR/customer-hub-data/attachments" \
+  PANEL_BASE_URL="http://127.0.0.1:$PANEL_PORT" APP_ORIGIN="http://127.0.0.1:$CUSTOMER_HUB_PORT" \
+  CUSTOMER_HUB_ENCRYPTION_KEY=0707070707070707070707070707070707070707070707070707070707070707 \
+  SESSION_SECURE=false MOCK_ADAPTERS_ENABLED=true \
+  "$NODE24_BIN" dist-server/server/index.js) >"$RUNTIME_DIR/customer-hub.log" 2>&1 &
+PIDS="$PIDS $!"
+
 (cd "$LABEL_REPO" && exec env NODE_ENV=production PORT="$LABEL_PORT" DATA_DIR="$RUNTIME_DIR/label-data" \
   PANEL_API_URL="http://127.0.0.1:$PANEL_PORT" COOKIE_SECURE=false \
   "$NODE24_BIN" server.mjs) >"$RUNTIME_DIR/label.log" 2>&1 &
@@ -93,7 +103,9 @@ PIDS="$PIDS $!"
 wait_for label-printer "http://127.0.0.1:$LABEL_PORT/api/health"
 wait_for warehouse "http://127.0.0.1:$WAREHOUSE_PORT/health"
 wait_for kit-studio "http://127.0.0.1:$KIT_PORT/api/health"
+wait_for customer-hub "http://127.0.0.1:$CUSTOMER_HUB_PORT/api/health"
 
 env PANEL_URL="http://127.0.0.1:$PANEL_PORT" WAREHOUSE_URL="http://127.0.0.1:$WAREHOUSE_PORT" \
   LABEL_PRINTER_URL="http://127.0.0.1:$LABEL_PORT" KIT_STUDIO_URL="http://127.0.0.1:$KIT_PORT" \
+  CUSTOMER_HUB_URL="http://127.0.0.1:$CUSTOMER_HUB_PORT" \
   "$NODE24_BIN" --test "$ROOT_DIR/tests/operations.e2e.mjs"

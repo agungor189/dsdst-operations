@@ -2,7 +2,7 @@
 
 ## First deployment
 
-1. Clone the four application repositories and this repository as sibling directories, or set the four `*_CONTEXT` variables explicitly.
+1. Clone the five application repositories and this repository as sibling directories, or set the five `*_CONTEXT` variables explicitly.
 2. Copy `.env.example` to `.env` and replace all placeholders. Obtain separate Panel API keys for Warehouse and Kit Studio with only their required permissions.
 3. Keep `BIND_ADDRESS=127.0.0.1` unless a firewall and TLS reverse proxy explicitly require another listener.
 4. Run `scripts/deploy.sh`.
@@ -20,4 +20,4 @@ After that acceptance window, the four per-repository `docker-compose.yml` files
 
 ## System test
 
-`scripts/e2e.sh` builds an isolated Compose project with unique networks and volumes, runs the full receiving/template/picking workflow in dry-run print mode, then removes only that test project's containers and volumes. `scripts/e2e-local.sh` provides the same workflow with temporary SQLite files when Docker is unavailable; repository paths can be supplied through the four `*_CONTEXT` variables.
+`scripts/e2e.sh` builds an isolated Compose project with unique networks and volumes, runs the full receiving/template/picking workflow plus Customer Hub session/inbound/outbox/CRM workflow, then removes only that test project's containers and volumes. `scripts/e2e-local.sh` provides the same workflow with temporary SQLite files when Docker is unavailable; repository paths can be supplied through the five `*_CONTEXT` variables.
