@@ -127,6 +127,48 @@ services:
       retries: 3
       start_period: 10s
 
+  dsdst-customer-hub:
+    image: ${CUSTOMER_HUB_IMAGE:-dsdst-customer-hub:local}
+    build:
+      context: ${CUSTOMER_HUB_CONTEXT:-../dsdst-customer-hub}
+    restart: unless-stopped
+    <<: *security
+    depends_on:
+      dsdst-panel:
+        condition: service_healthy
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${CUSTOMER_HUB_PORT:-3100}:3100"
+    environment:
+      NODE_ENV: production
+      PORT: 3100
+      APP_ORIGIN: ${CUSTOMER_HUB_APP_ORIGIN:?CUSTOMER_HUB_APP_ORIGIN is required}
+      PANEL_BASE_URL: http://dsdst-panel:3000
+      DATABASE_PATH: /data/customer-hub.db
+      ATTACHMENTS_DIR: /data/attachments
+      BACKUP_DIR: /backups
+      CUSTOMER_HUB_ENCRYPTION_KEY: ${CUSTOMER_HUB_ENCRYPTION_KEY:?CUSTOMER_HUB_ENCRYPTION_KEY is required}
+      SESSION_SECURE: ${CUSTOMER_HUB_SESSION_SECURE:-true}
+      META_APP_SECRET: ${CUSTOMER_HUB_META_APP_SECRET:-}
+      META_WEBHOOK_VERIFY_TOKEN: ${CUSTOMER_HUB_META_WEBHOOK_VERIFY_TOKEN:-}
+      ALLOWED_REMOTE_ATTACHMENT_HOSTS: ${CUSTOMER_HUB_ALLOWED_REMOTE_ATTACHMENT_HOSTS:-}
+      MOCK_ADAPTERS_ENABLED: "false"
+      APP_VERSION: ${CUSTOMER_HUB_VERSION:-unknown}
+      APP_COMMIT: ${CUSTOMER_HUB_COMMIT:-unknown}
+    volumes:
+      - ${CUSTOMER_HUB_DATA_DIR:-customer_hub_data}:/data
+      - ${CUSTOMER_HUB_BACKUP_DIR:-./backups/customer-hub}:/backups
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    networks:
+      - edge
+      - internal
+    healthcheck:
+      test: ["CMD", "customer-hub-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   label-printer:
     image: ${LABEL_PRINTER_IMAGE:-label-printer:local}
     build:
@@ -201,6 +243,7 @@ services:
       - ${KIT_STUDIO_DATA_DIR:-kit_studio_data}:/sources/kit-data:ro
       - ${KIT_STUDIO_UPLOADS_DIR:-kit_studio_uploads}:/sources/kit-uploads:ro
       - ${LABEL_PRINTER_DATA_DIR:-label_printer_data}:/sources/labels:ro
+      - ${CUSTOMER_HUB_DATA_DIR:-customer_hub_data}:/sources/customer-hub-data:ro
       - ${OPERATIONS_BACKUP_DIR:-./backups}:/backups
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
@@ -213,6 +256,7 @@ volumes:
   kit_studio_data:
   kit_studio_uploads:
   label_printer_data:
+  customer_hub_data:
 
 networks:
   edge:
