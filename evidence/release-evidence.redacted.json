@@ -30,9 +30,9 @@
         },
         "volumes": {
           "declared": [
-            { "source_alias": "PANEL_DATA_DIR", "target": "/data", "mode": "rw" },
-            { "source_alias": "PANEL_UPLOADS_DIR", "target": "/app/uploads", "mode": "rw" },
-            { "source_alias": "PANEL_BACKUP_DIR", "target": "/backups", "mode": "rw" }
+            { "source_alias": "PANEL_DATA_DIR", "target": "/data", "mode": "rw", "source_id": "NOT VERIFIED" },
+            { "source_alias": "PANEL_UPLOADS_DIR", "target": "/app/uploads", "mode": "rw", "source_id": "NOT VERIFIED" },
+            { "source_alias": "PANEL_BACKUP_DIR", "target": "/backups", "mode": "rw", "source_id": "NOT VERIFIED" }
           ],
           "observed": "NOT VERIFIED"
         },
@@ -89,8 +89,8 @@
         },
         "volumes": {
           "declared": [
-            { "source_alias": "KIT_STUDIO_DATA_DIR", "target": "/data", "mode": "rw" },
-            { "source_alias": "KIT_STUDIO_UPLOADS_DIR", "target": "/app/uploads", "mode": "rw" }
+            { "source_alias": "KIT_STUDIO_DATA_DIR", "target": "/data", "mode": "rw", "source_id": "NOT VERIFIED" },
+            { "source_alias": "KIT_STUDIO_UPLOADS_DIR", "target": "/app/uploads", "mode": "rw", "source_id": "NOT VERIFIED" }
           ],
           "observed": "NOT VERIFIED"
         },
@@ -121,7 +121,7 @@
         },
         "volumes": {
           "declared": [
-            { "source_alias": "LABEL_PRINTER_DATA_DIR", "target": "/app/data", "mode": "rw" }
+            { "source_alias": "LABEL_PRINTER_DATA_DIR", "target": "/app/data", "mode": "rw", "source_id": "NOT VERIFIED" }
           ],
           "observed": "NOT VERIFIED"
         },
@@ -152,7 +152,7 @@
         },
         "volumes": {
           "declared": [
-            { "source_alias": "LABEL_PRINTER_DATA_DIR", "target": "/app/data", "mode": "ro" }
+            { "source_alias": "LABEL_PRINTER_DATA_DIR", "target": "/app/data", "mode": "ro", "source_id": "NOT VERIFIED" }
           ],
           "observed": "NOT VERIFIED"
         },

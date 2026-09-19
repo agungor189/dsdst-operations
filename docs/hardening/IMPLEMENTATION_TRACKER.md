@@ -147,9 +147,10 @@ Sonraki görev başlangıcında:
 ### PR01 — Review bekliyor
 
 - Kod: `HAZIR`
-- Test: `PASS` — manifest doğrulama, 7 fixture testi, JSON parse, ShellCheck ve
-  shell syntax
-- Review: `BEKLİYOR`; bağımsız review yapılmadı
+- Test: `PASS` — manifest doğrulama, 32 test (mevcut 7 fixture korunuyor),
+  standart Ajv Draft 2020-12 doğrulaması, ShellCheck ve shell syntax
+- Review: İlk bağımsız inceleme `DÜZELTME GEREKİYOR`; düzeltmeler sonrası
+  tekrar bağımsız review `BEKLİYOR`. PR01 açık, kabul edilmiş değildir.
 - Canlıya alma: `YETKİ YOK`; deploy/restart/migration çalıştırılmadı
 - Runtime commit/image/schema/config/volume/network/port kanıtı: **NOT VERIFIED**
 - Veri etkisi: Yok
@@ -158,3 +159,10 @@ Sonraki görev başlangıcında:
 
 Kabul edilmiş hardening görevi henüz yoktur. PR01 insan review/kabulünden sonra
 exact O commit SHA'sı kabul manifestine eklenecektir.
+
+PR01 review düzeltmesi `a1d16613bac169b5396468bc5779f24370d93b4a` üzerine
+eklenmiştir. Yeni 5 regresyon önce 5 FAIL / mevcut 7 PASS ile kusurları
+üretmiştir. Runtime SHA için container/image/revision bağı, volume kaynak
+kimliği, tam host port eşlemesi ve standart JSON Schema doğrulaması eklendi.
+Sonraki görev bu düzeltmenin kabul edilmiş exact commitini içermelidir;
+PR02 için henüz kabul/onay yoktur. Migration ve production veri etkisi yoktur.

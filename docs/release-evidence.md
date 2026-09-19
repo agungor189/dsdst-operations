@@ -16,8 +16,12 @@ Bu repodaki örnek manifest gerçek runtime kanıtı değildir:
 
 1. `git rev-parse HEAD`, remote branch SHA'sı, audit SHA'sı veya build context
    SHA'sı tek başına çalışan commit değildir. Runtime commit yalnız çalışan
-   image'ın doğrulanmış OCI revision label'ından veya aynı image digestine bağlı
-   imzalı build provenance kaydından yazılır.
+   image'ın OCI revision label'ından yazılır. `commit.evidence_source` serbest
+   metin değildir: `{kind: "runtime-oci-revision", container_id, image_digest,
+   revision}` nesnesidir. Revision SHA ile, image_digest çalışan image'ın
+   registry digest değeriyle eşleşmelidir. Tam container ID, yetkili capture
+   zamanı ve `READ-ONLY AUTHORIZED` gerekir. Label yoksa SHA `NOT VERIFIED`
+   kalır. Git HEAD dahil başka kaynak türleri reddedilir.
 2. Tag (`latest`, semver veya commit tagı) immutable image digest değildir.
    `runtime.image.digest` yalnız registry `RepoDigest` kanıtından doldurulur.
    Yerel image ID bir registry digest yerine geçirilmez.
@@ -25,8 +29,8 @@ Bu repodaki örnek manifest gerçek runtime kanıtı değildir:
    `NOT VERIFIED` yazılır. Stateless alanlarda yalnız şemada izin verilen
    `NOT APPLICABLE` kullanılır.
 4. Manifest hiçbir secret veya yapılandırma değeri içermez. Yapılandırma için
-   yalnız izinli anahtar adları ve tüm runtime environment'ın redaksiyonlu
-   SHA-256 fingerprint'i tutulur.
+   yalnız izinli anahtar adları ve izinli yapılandırmanın SHA-256 fingerprint'i
+   tutulur; secret değerleri hash girdisine dahi alınmaz.
 5. L ve renderer aynı repository, runtime commit, image reference, image digest
    ve label state kaynağını kullanmalıdır. Renderer state'i `ro`, yalnız
    `internal` networkte ve host portu olmadan tüketir.
@@ -35,6 +39,11 @@ Bu repodaki örnek manifest gerçek runtime kanıtı değildir:
 7. Bu süreç deploy, restart, image pull/build, migration veya veri yazısı
    çalıştırmaz. Runtime değiştirildiğinde eski manifest yeni release için
    yeniden kullanılmaz.
+
+Doğrulayıcı çevrimdışı kanıt sözleşmesini denetler; Docker'a bağlanmaz ve
+operatörün ürettiği bir kaydın gerçekliğini kendisi tasdik edemez. `VERIFIED`
+yalnız yetkili operatörün gerçekten topladığı kayıtta kullanılabilir. Sentetik
+pozitif testler production kanıtı değildir.
 
 ## Beklenen compose eşlemesi
 
@@ -58,6 +67,8 @@ erişimi ayrıca açık yetki ister. Yetkili operatör komutları debug tracing
 Önce yetkili hostta yalnız dosya konumlarını tanımla:
 
 ```sh
+# Bash oturumunda: başarısız Docker komutundan sahte hash üretilmesini engeller.
+set -euo pipefail
 EVIDENCE_COMPOSE_FILE=/approved/path/dsdst-operations/compose.prod.yml
 EVIDENCE_ENV_FILE=/approved/secret-store/runtime.env
 ```
@@ -85,26 +96,39 @@ docker image inspect "$(docker inspect --format '{{.Image}}' "$EVIDENCE_CONTAINE
 ```
 
 `RepoDigests` boşsa digest `NOT VERIFIED` kalır. Revision label yoksa local
-repo `HEAD` kullanılmaz; commit `NOT VERIFIED` kalır. Provenance kaydı varsa
-digest ile aynı image'ı işaret ettiği ayrıca doğrulanır.
+repo `HEAD` kullanılmaz; commit `NOT VERIFIED` kalır. OCI revision kanıtı
+container ID ve aynı image'ın registry digest değeriyle birlikte kaydedilir.
 
-Environment değerlerini ekrana vermeden deterministik config fingerprint'i
-üret. Bu pipeline'ın ara çıktısı secret değerleri içerdiği için `tee`, shell
-trace veya dosya yönlendirmesi eklenmez; yalnız son hash kaydedilir:
+Environment değerlerini ekrana vermeden izinli config fingerprint'i üret.
+`EVIDENCE_SERVICE_ID` manifestteki servis ID'sidir. Bu komut O checkout'unda
+çalıştırılır. Ara Docker çıktısına `tee` veya yönlendirme eklenmez:
 
 ```sh
-docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$EVIDENCE_CONTAINER_ID" \
-  | LC_ALL=C sort \
-  | shasum -a 256 \
-  | awk '{print "sha256:" $1}'
+docker inspect --format '{{json .Config.Env}}' "$EVIDENCE_CONTAINER_ID" \
+  | node --input-type=module -e '
+import {readFileSync} from "node:fs";
+import {createHash} from "node:crypto";
+const m=JSON.parse(readFileSync("evidence/release-evidence.redacted.json"));
+const service=m.services.find(s=>s.service_id===process.argv[1]);
+if(!service) process.exit(1);
+let input=""; for await(const c of process.stdin) input+=c;
+const allowed=new Set(service.runtime.configuration.safe_keys);
+const pairs=JSON.parse(input).map(s=>[s.slice(0,s.indexOf("=")),s.slice(s.indexOf("=")+1)]).filter(([k])=>allowed.has(k)).sort(([a],[b])=>a.localeCompare(b));
+console.log("sha256:"+createHash("sha256").update(JSON.stringify(pairs)).digest("hex"));
+' "$EVIDENCE_SERVICE_ID"
 ```
 
-Volume kaynak path/name değerlerini göstermeden yalnız mount tipi, hedefi ve
-read/write durumunu oku. Yetkili operatör hedefi manifestteki redaksiyonlu
-`source_alias` ile eşleştirir; gerçek host yolu kayda alınmaz:
+Volume kaynak path/name değerlerini göstermeden kaynak kimliğini hashle.
+Kimlik `SHA256(JSON.stringify([Type, Source]))` şeklindedir. Aynı hosttaki L
+ve renderer aynı kimliği vermelidir. `/tmp` tmpfs persistent volume değildir
+ve aşağıdaki çıktıdan çıkarılır. Host yolu çıktı veya repoya yazılmaz:
 
 ```sh
-docker inspect --format '{{range .Mounts}}{{printf "%s|%s|rw=%t\n" .Type .Destination .RW}}{{end}}' "$EVIDENCE_CONTAINER_ID"
+docker inspect --format '{{json .Mounts}}' "$EVIDENCE_CONTAINER_ID" \
+  | node --input-type=module -e '
+import {createHash} from "node:crypto";
+let input="";for await(const c of process.stdin)input+=c;
+console.log(JSON.stringify(JSON.parse(input).filter(m=>m.Type!=="tmpfs").map(m=>({target:m.Destination,mode:m.RW?"rw":"ro",source_id:"sha256:"+createHash("sha256").update(JSON.stringify([m.Type,m.Source])).digest("hex")}))));'
 ```
 
 Network ve port eşleşmesi secret içermez:
@@ -117,6 +141,18 @@ docker inspect --format '{{json .NetworkSettings.Ports}}' "$EVIDENCE_CONTAINER_I
 Docker gerçek network adları (`dsdst-edge`, `dsdst-internal`) manifestte
 compose anahtarları (`edge`, `internal`) olarak normalize edilir. Renderer için
 host binding görülürse veya `edge` ağı görülürse manifest reddedilmelidir.
+
+`volumes.declared[].source_id` yetkili operatör tarafından beklenen deployment
+mount planından aynı hash algoritmasıyla elde edilir. `observed[].source_id`
+yukarıdaki runtime komutundan gelir. Beklenen kimlik gözlenenden körlemesine
+kopyalanmaz; beklenen plan bilinmiyorsa alan `NOT VERIFIED` kalır. Alias,
+hedef, mod ve kaynak kimliği birlikte karşılaştırılır; L–renderer kaynak
+kimlikleri ayrıca eşit olmalıdır.
+
+Bu PR'ın port sözleşmesi Compose varsayılanlarıdır: 127.0.0.1 üzerinde
+P=3000, W=3006, K=3012, L=3013; renderer internal 3010. Farklı host portu
+veya bind adresi olan kurulumlar otomatik kabul edilmez; sözleşme ve testlerin
+ayrı review ile güncellenmesi gerekir. Observed portlar sayısal olmalıdır.
 
 Panel SQLite migration seviyesini DB'yi read-only açarak oku:
 
@@ -162,14 +198,16 @@ toplama prosedüründe kullanılmaz:
 
 1. Redaksiyonlu şablon kopyalanır; orijinal şablon korunur.
 2. Her runtime alanı yalnız karşılık gelen salt-okunur kanıtla doldurulur.
-3. `evidence_source`, komutun kendisini veya yetkili provenance kayıt kimliğini
-   tarif eder; secret veya ham çıktı içermez.
+3. Commit kanıtı yukarıdaki yapılandırılmış nesnedir. Image kaynağı yalnız
+   `docker image inspect`, şema kaynağı `read-only schema query` veya stateless
+   servisler için `compose.prod.yml` olur. Bilinmeyenler `NOT VERIFIED` kalır.
 4. Gözlenen mount/network/portlar normalize edilerek `observed` alanına yazılır.
 5. Herhangi bir alan eksikse `NOT VERIFIED` bırakılır ve manifest statusü
    değiştirilmez.
 6. Doğrulayıcı çalıştırılır:
 
 ```sh
+npm ci --ignore-scripts
 node scripts/validate-release-evidence.mjs evidence/release-evidence.redacted.json
 node --test tests/release-evidence.test.mjs
 ```

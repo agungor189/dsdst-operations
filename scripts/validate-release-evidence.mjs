@@ -2,6 +2,14 @@
 
 import { readFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import Ajv2020 from "ajv/dist/2020.js";
+import addFormats from "ajv-formats";
+const ajv = new Ajv2020({strict: true});
+addFormats(ajv);
+const schemaCheck = ajv.compile(JSON.parse(readFileSync(new URL("../schemas/release-evidence.schema.json", import.meta.url), "utf8")));
+export function validateSchema(manifest) {
+  if (!schemaCheck(manifest)) throw new Error(`Schema validation failed at ${schemaCheck.errors[0].instancePath}`);
+}
 
 const UNKNOWN = "NOT VERIFIED";
 const NOT_APPLICABLE = "NOT APPLICABLE";
@@ -90,6 +98,8 @@ const requireExactKeys = (value, expectedKeys, path) => {
 };
 
 const sameJson = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+const hostPorts = {"dsdst-panel": ["PANEL_PORT",3000], "dsdst-warehouse": ["WAREHOUSE_PORT",3006], "dsdst-kit-studio": ["KIT_STUDIO_PORT",3012], "label-printer": ["LABEL_PRINTER_PORT",3013]};
+const mapping = ({source_id, ...rest}) => rest;
 
 const validateObserved = (value, path, itemValidator) => {
   if (value === UNKNOWN) return;
@@ -97,7 +107,8 @@ const validateObserved = (value, path, itemValidator) => {
 };
 
 const validateVolume = (volume, path) => {
-  requireExactKeys(volume, ["source_alias", "target", "mode"], path);
+  requireExactKeys(volume, ["source_alias", "target", "mode", "source_id"], path);
+  if (volume.source_id !== UNKNOWN && !DIGEST_PATTERN.test(volume.source_id)) fail(path, "invalid volume source identity");
   if (!/^[A-Z][A-Z0-9_]*$/.test(requireString(volume.source_alias, `${path}.source_alias`))) {
     fail(`${path}.source_alias`, "must be a redacted configuration alias");
   }
@@ -125,7 +136,16 @@ const validateRuntime = (service, expected, path) => {
 
   requireExactKeys(runtime.commit, ["value", "evidence_source"], `${path}.runtime.commit`);
   const commit = requireString(runtime.commit.value, `${path}.runtime.commit.value`);
-  requireString(runtime.commit.evidence_source, `${path}.runtime.commit.evidence_source`);
+  const proof = runtime.commit.evidence_source;
+  if (commit === UNKNOWN) {
+    if (proof !== UNKNOWN) fail(`${path}.runtime.commit.evidence_source`, "unverified commit must have NOT VERIFIED evidence");
+  } else {
+    requireExactKeys(proof, ["kind", "container_id", "image_digest", "revision"], `${path}.runtime.commit.evidence_source`);
+    if (proof.kind !== "runtime-oci-revision" || !/^[a-f0-9]{64}$/.test(proof.container_id) ||
+        !DIGEST_PATTERN.test(proof.image_digest) || proof.image_digest !== runtime.image.digest || proof.revision !== commit) {
+      fail(`${path}.runtime.commit.evidence_source`, "runtime provenance must bind container, revision and image digest");
+    }
+  }
   if (commit !== UNKNOWN && !SHA_PATTERN.test(commit)) fail(`${path}.runtime.commit.value`, "must be NOT VERIFIED or a full Git SHA");
   if (commit !== UNKNOWN && runtime.commit.evidence_source === UNKNOWN) fail(`${path}.runtime.commit.evidence_source`, "must identify runtime evidence for a verified commit");
 
@@ -133,6 +153,7 @@ const validateRuntime = (service, expected, path) => {
   requireString(runtime.image.reference, `${path}.runtime.image.reference`);
   const digest = requireString(runtime.image.digest, `${path}.runtime.image.digest`);
   requireString(runtime.image.evidence_source, `${path}.runtime.image.evidence_source`);
+  if (![UNKNOWN, "docker image inspect"].includes(runtime.image.evidence_source)) fail(`${path}.runtime.image.evidence_source`, "unsupported runtime image evidence source");
   if (digest !== UNKNOWN && !DIGEST_PATTERN.test(digest)) fail(`${path}.runtime.image.digest`, "must be NOT VERIFIED or sha256:<64 lowercase hex>");
   if (digest !== UNKNOWN && runtime.image.evidence_source === UNKNOWN) fail(`${path}.runtime.image.evidence_source`, "must identify runtime evidence for a verified digest");
 
@@ -140,6 +161,7 @@ const validateRuntime = (service, expected, path) => {
   if (runtime.schema.kind !== expected.schemaKind) fail(`${path}.runtime.schema.kind`, `must be ${expected.schemaKind}`);
   requireString(runtime.schema.version, `${path}.runtime.schema.version`);
   requireString(runtime.schema.evidence_source, `${path}.runtime.schema.evidence_source`);
+  if (![UNKNOWN, "compose.prod.yml", "read-only schema query"].includes(runtime.schema.evidence_source)) fail(`${path}.runtime.schema.evidence_source`, "unsupported schema evidence source");
   if (runtime.schema.kind === "none" && runtime.schema.version !== NOT_APPLICABLE) fail(`${path}.runtime.schema.version`, "must be NOT APPLICABLE for a stateless service");
   if (runtime.schema.kind !== "none" && runtime.schema.version === NOT_APPLICABLE) fail(`${path}.runtime.schema.version`, "cannot be NOT APPLICABLE for a stateful service");
 
@@ -159,9 +181,10 @@ const validateRuntime = (service, expected, path) => {
   requireExactKeys(runtime.volumes, ["declared", "observed"], `${path}.runtime.volumes`);
   const declaredVolumes = requireArray(runtime.volumes.declared, `${path}.runtime.volumes.declared`);
   declaredVolumes.forEach((volume, index) => validateVolume(volume, `${path}.runtime.volumes.declared[${index}]`));
-  if (!sameJson(declaredVolumes, expected.volumes)) fail(`${path}.runtime.volumes.declared`, "does not match the service mapping contract");
+  if (!sameJson(declaredVolumes.map(mapping), expected.volumes)) fail(`${path}.runtime.volumes.declared`, "does not match the service mapping contract");
   validateObserved(runtime.volumes.observed, `${path}.runtime.volumes.observed`, validateVolume);
   if (runtime.volumes.observed !== UNKNOWN && !sameJson(runtime.volumes.observed, declaredVolumes)) fail(`${path}.runtime.volumes.observed`, "does not match declared volume mappings");
+  if (runtime.volumes.observed !== UNKNOWN && runtime.volumes.observed.some(v => v.source_id === UNKNOWN)) fail(`${path}.runtime.volumes.observed`, "observed volume requires actual source identity");
 
   requireExactKeys(runtime.networks, ["declared", "observed"], `${path}.runtime.networks`);
   const declaredNetworks = requireArray(runtime.networks.declared, `${path}.runtime.networks.declared`);
@@ -174,10 +197,14 @@ const validateRuntime = (service, expected, path) => {
   declaredPorts.forEach((port, index) => validatePort(port, `${path}.runtime.ports.declared[${index}]`));
   const portContract = declaredPorts.map(({ exposure, container_port, protocol }) => ({ exposure, container_port, protocol }));
   if (!sameJson(portContract, expected.ports)) fail(`${path}.runtime.ports.declared`, "does not match the service mapping contract");
+  const binding = hostPorts[service.service_id];
+  const declaredPort = declaredPorts[0];
+  if (binding && (declaredPort.host_ip !== "${BIND_ADDRESS:-127.0.0.1}" || declaredPort.host_port !== `\${${binding[0]}:-${binding[1]}}`)) fail(`${path}.runtime.ports.declared`, "unexpected host binding declaration");
   validateObserved(runtime.ports.observed, `${path}.runtime.ports.observed`, validatePort);
   if (runtime.ports.observed !== UNKNOWN) {
     const observedContract = runtime.ports.observed.map(({ exposure, container_port, protocol }) => ({ exposure, container_port, protocol }));
     if (!sameJson(observedContract, expected.ports)) fail(`${path}.runtime.ports.observed`, "does not match the service mapping contract");
+    if (binding && (runtime.ports.observed[0].host_ip !== "127.0.0.1" || runtime.ports.observed[0].host_port !== binding[1])) fail(`${path}.runtime.ports.observed`, "unexpected host port binding; overrides require reviewed contract changes");
   }
 };
 
@@ -225,6 +252,9 @@ export function validateReleaseEvidence(manifest) {
   if (label.runtime.commit.value !== renderer.runtime.commit.value) fail("manifest.services", "Label Printer and renderer must have the same runtime commit");
   if (label.runtime.image.reference !== renderer.runtime.image.reference) fail("manifest.services", "Label Printer and renderer must have the same image reference");
   if (label.runtime.image.digest !== renderer.runtime.image.digest) fail("manifest.services", "Label Printer and renderer must have the same image digest");
+  if (label.runtime.volumes.declared[0].source_id !== renderer.runtime.volumes.declared[0].source_id) fail("manifest.services", "Label Printer and renderer must have the same volume source identity");
+  if (services.some(s => s.runtime.commit.value !== UNKNOWN) &&
+      (manifest.runtime_access !== "READ-ONLY AUTHORIZED" || manifest.captured_at === UNKNOWN)) fail("manifest.runtime", "runtime evidence requires authorized capture timestamp");
 
   if (manifest.evidence_status === "VERIFIED") {
     if (manifest.runtime_access !== "READ-ONLY AUTHORIZED") fail("manifest.runtime_access", "VERIFIED manifest requires read-only authorization");
@@ -233,6 +263,7 @@ export function validateReleaseEvidence(manifest) {
     if (unknownPath) fail(unknownPath, "VERIFIED manifest cannot contain NOT VERIFIED");
   }
 
+  validateSchema(manifest);
   return manifest;
 }
 

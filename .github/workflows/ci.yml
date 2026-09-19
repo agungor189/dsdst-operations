@@ -18,6 +18,7 @@ jobs:
           node-version: 22
       - name: Release evidence contract
         run: |
+          npm ci --ignore-scripts
           node scripts/validate-release-evidence.mjs evidence/release-evidence.redacted.json
           node --test tests/release-evidence.test.mjs
       - name: Shell syntax

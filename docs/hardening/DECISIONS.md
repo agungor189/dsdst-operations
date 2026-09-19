@@ -118,6 +118,14 @@ silinmez veya tahmin edilmez, `NOT VERIFIED` kalır. Redaksiyonlu manifest
 secret/config değerlerini değil yalnız güvenli yapı anahtarlarını ve hash'i
 tutar.
 
+PR01 review düzeltmesi: SHA kanıtı yalnız `runtime-oci-revision` türüyle,
+container ID + aynı image digest + aynı revision bağlarıyla kabul edilir.
+Yetkili capture kaydı gerekir; kanıt yoksa `NOT VERIFIED` korunur. Doğrulayıcı
+kanıtın yapısını/tutarlılığını kontrol eder; canlı gözlem yetkili operatöre aittir.
+Volume kaynakları path göstermeyen source hash ile karşılaştırılır. Port
+override'ları mevcut varsayılan sözleşmeye sessizce dahil edilmez; ayrı review
+gerektirir. Bu karar PR01'i kapatmaz.
+
 ## Karar bekleyen iş politikaları
 
 Aşağıdakiler onaylanmış çözüm kabul edilmez. İlgili görevde koddan önce karar
