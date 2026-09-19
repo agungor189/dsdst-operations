@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dsdst.local/schemas/release-evidence.schema.json",
+  "title": "DSDST redacted release evidence manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "$schema",
+    "manifest_version",
+    "evidence_id",
+    "environment",
+    "captured_at",
+    "runtime_access",
+    "evidence_status",
+    "source_checkout_notice",
+    "redaction",
+    "services"
+  ],
+  "properties": {
+    "$schema": { "const": "../schemas/release-evidence.schema.json" },
+    "manifest_version": { "const": 1 },
+    "evidence_id": { "type": "string", "minLength": 1 },
+    "environment": { "type": "string", "minLength": 1 },
+    "captured_at": {
+      "oneOf": [
+        { "const": "NOT VERIFIED" },
+        { "type": "string", "format": "date-time" }
+      ]
+    },
+    "runtime_access": { "enum": ["NOT AUTHORIZED", "READ-ONLY AUTHORIZED"] },
+    "evidence_status": { "enum": ["NOT VERIFIED", "VERIFIED"] },
+    "source_checkout_notice": { "type": "string", "minLength": 1 },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["secret_values_included", "configuration_values_included"],
+      "properties": {
+        "secret_values_included": { "const": false },
+        "configuration_values_included": { "const": false }
+      }
+    },
+    "services": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/service" }
+    }
+  },
+  "$defs": {
+    "verificationText": {
+      "type": "string",
+      "minLength": 1
+    },
+    "commit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "evidence_source"],
+      "properties": {
+        "value": {
+          "type": "string",
+          "pattern": "^(NOT VERIFIED|[0-9a-f]{40}|[0-9a-f]{64})$"
+        },
+        "evidence_source": { "$ref": "#/$defs/verificationText" }
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "digest", "evidence_source"],
+      "properties": {
+        "reference": { "$ref": "#/$defs/verificationText" },
+        "digest": {
+          "type": "string",
+          "pattern": "^(NOT VERIFIED|sha256:[0-9a-f]{64})$"
+        },
+        "evidence_source": { "$ref": "#/$defs/verificationText" }
+      }
+    },
+    "schemaEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "version", "evidence_source"],
+      "properties": {
+        "kind": { "enum": ["sqlite", "json-state", "none"] },
+        "version": { "$ref": "#/$defs/verificationText" },
+        "evidence_source": { "$ref": "#/$defs/verificationText" }
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "fingerprint", "redacted", "safe_keys"],
+      "properties": {
+        "status": { "enum": ["NOT VERIFIED", "VERIFIED"] },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^(NOT VERIFIED|sha256:[0-9a-f]{64})$"
+        },
+        "redacted": { "const": true },
+        "safe_keys": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
+        }
+      }
+    },
+    "volume": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_alias", "target", "mode"],
+      "properties": {
+        "source_alias": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+        "target": { "type": "string", "pattern": "^/" },
+        "mode": { "enum": ["ro", "rw"] }
+      }
+    },
+    "volumes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["declared", "observed"],
+      "properties": {
+        "declared": { "type": "array", "items": { "$ref": "#/$defs/volume" } },
+        "observed": {
+          "oneOf": [
+            { "const": "NOT VERIFIED" },
+            { "type": "array", "items": { "$ref": "#/$defs/volume" } }
+          ]
+        }
+      }
+    },
+    "networks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["declared", "observed"],
+      "properties": {
+        "declared": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["edge", "internal"] }
+        },
+        "observed": {
+          "oneOf": [
+            { "const": "NOT VERIFIED" },
+            {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "enum": ["edge", "internal"] }
+            }
+          ]
+        }
+      }
+    },
+    "port": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exposure", "host_ip", "host_port", "container_port", "protocol"],
+      "properties": {
+        "exposure": { "enum": ["published", "internal"] },
+        "host_ip": { "type": "string", "minLength": 1 },
+        "host_port": {
+          "oneOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "integer", "minimum": 1, "maximum": 65535 }
+          ]
+        },
+        "container_port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "protocol": { "enum": ["tcp", "udp"] }
+      }
+    },
+    "ports": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["declared", "observed"],
+      "properties": {
+        "declared": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/port" } },
+        "observed": {
+          "oneOf": [
+            { "const": "NOT VERIFIED" },
+            { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/port" } }
+          ]
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "image", "schema", "configuration", "volumes", "networks", "ports"],
+      "properties": {
+        "commit": { "$ref": "#/$defs/commit" },
+        "image": { "$ref": "#/$defs/image" },
+        "schema": { "$ref": "#/$defs/schemaEvidence" },
+        "configuration": { "$ref": "#/$defs/configuration" },
+        "volumes": { "$ref": "#/$defs/volumes" },
+        "networks": { "$ref": "#/$defs/networks" },
+        "ports": { "$ref": "#/$defs/ports" }
+      }
+    },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["service_id", "component", "repository", "relationship", "declared_mapping_source", "runtime"],
+      "properties": {
+        "service_id": { "type": "string", "minLength": 1 },
+        "component": { "enum": ["P", "W", "K", "L", "renderer"] },
+        "repository": { "type": "string", "minLength": 1 },
+        "relationship": { "type": "string", "minLength": 1 },
+        "declared_mapping_source": { "const": "compose.prod.yml" },
+        "runtime": { "$ref": "#/$defs/runtime" }
+      }
+    }
+  }
+}

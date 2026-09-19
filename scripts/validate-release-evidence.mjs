@@ -1,0 +1,273 @@
+#!/usr/bin/env node
+
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
+const UNKNOWN = "NOT VERIFIED";
+const NOT_APPLICABLE = "NOT APPLICABLE";
+const SHA_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
+const SENSITIVE_KEY_PATTERN = /(SECRET|PASSWORD|TOKEN|API_KEY|ACCESS_KEY|PRIVATE_KEY|CREDENTIAL)/i;
+
+const EXPECTED_SERVICES = {
+  "dsdst-panel": {
+    component: "P",
+    repository: "agungor189/panel-kit-yonetimi",
+    schemaKind: "sqlite",
+    networks: ["edge", "internal"],
+    volumes: [
+      { source_alias: "PANEL_DATA_DIR", target: "/data", mode: "rw" },
+      { source_alias: "PANEL_UPLOADS_DIR", target: "/app/uploads", mode: "rw" },
+      { source_alias: "PANEL_BACKUP_DIR", target: "/backups", mode: "rw" },
+    ],
+    ports: [{ exposure: "published", container_port: 3000, protocol: "tcp" }],
+  },
+  "dsdst-warehouse": {
+    component: "W",
+    repository: "agungor189/Dsdst-Warehouse",
+    schemaKind: "none",
+    networks: ["edge", "internal"],
+    volumes: [],
+    ports: [{ exposure: "published", container_port: 3006, protocol: "tcp" }],
+  },
+  "dsdst-kit-studio": {
+    component: "K",
+    repository: "agungor189/dsdst-kit-studio",
+    schemaKind: "sqlite",
+    networks: ["edge", "internal"],
+    volumes: [
+      { source_alias: "KIT_STUDIO_DATA_DIR", target: "/data", mode: "rw" },
+      { source_alias: "KIT_STUDIO_UPLOADS_DIR", target: "/app/uploads", mode: "rw" },
+    ],
+    ports: [{ exposure: "published", container_port: 3012, protocol: "tcp" }],
+  },
+  "label-printer": {
+    component: "L",
+    repository: "agungor189/Label-Printer",
+    schemaKind: "json-state",
+    networks: ["edge", "internal"],
+    volumes: [{ source_alias: "LABEL_PRINTER_DATA_DIR", target: "/app/data", mode: "rw" }],
+    ports: [{ exposure: "published", container_port: 3000, protocol: "tcp" }],
+  },
+  "warehouse-label-renderer": {
+    component: "renderer",
+    repository: "agungor189/Label-Printer",
+    schemaKind: "none",
+    networks: ["internal"],
+    volumes: [{ source_alias: "LABEL_PRINTER_DATA_DIR", target: "/app/data", mode: "ro" }],
+    ports: [{ exposure: "internal", container_port: 3010, protocol: "tcp" }],
+  },
+};
+
+const fail = (path, message) => {
+  throw new Error(`${path}: ${message}`);
+};
+
+const isObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+
+const requireObject = (value, path) => {
+  if (!isObject(value)) fail(path, "must be an object");
+  return value;
+};
+
+const requireArray = (value, path) => {
+  if (!Array.isArray(value)) fail(path, "must be an array");
+  return value;
+};
+
+const requireString = (value, path) => {
+  if (typeof value !== "string" || value.length === 0) fail(path, "must be a non-empty string");
+  return value;
+};
+
+const requireExactKeys = (value, expectedKeys, path) => {
+  requireObject(value, path);
+  for (const key of expectedKeys) {
+    if (!Object.hasOwn(value, key)) fail(`${path}.${key}`, "is required");
+  }
+  const unexpected = Object.keys(value).filter((key) => !expectedKeys.includes(key));
+  if (unexpected.length > 0) fail(path, `unexpected field(s): ${unexpected.join(", ")}`);
+};
+
+const sameJson = (left, right) => JSON.stringify(left) === JSON.stringify(right);
+
+const validateObserved = (value, path, itemValidator) => {
+  if (value === UNKNOWN) return;
+  requireArray(value, path).forEach((item, index) => itemValidator(item, `${path}[${index}]`));
+};
+
+const validateVolume = (volume, path) => {
+  requireExactKeys(volume, ["source_alias", "target", "mode"], path);
+  if (!/^[A-Z][A-Z0-9_]*$/.test(requireString(volume.source_alias, `${path}.source_alias`))) {
+    fail(`${path}.source_alias`, "must be a redacted configuration alias");
+  }
+  if (!requireString(volume.target, `${path}.target`).startsWith("/")) fail(`${path}.target`, "must be absolute");
+  if (!new Set(["ro", "rw"]).has(volume.mode)) fail(`${path}.mode`, "must be ro or rw");
+};
+
+const validatePort = (port, path) => {
+  requireExactKeys(port, ["exposure", "host_ip", "host_port", "container_port", "protocol"], path);
+  if (!new Set(["published", "internal"]).has(port.exposure)) fail(`${path}.exposure`, "must be published or internal");
+  requireString(port.host_ip, `${path}.host_ip`);
+  if (!(typeof port.host_port === "string" || Number.isInteger(port.host_port))) fail(`${path}.host_port`, "must be a string or integer");
+  if (!Number.isInteger(port.container_port) || port.container_port < 1 || port.container_port > 65535) {
+    fail(`${path}.container_port`, "must be a valid port");
+  }
+  if (!new Set(["tcp", "udp"]).has(port.protocol)) fail(`${path}.protocol`, "must be tcp or udp");
+  if (port.exposure === "internal" && (port.host_ip !== NOT_APPLICABLE || port.host_port !== NOT_APPLICABLE)) {
+    fail(path, "internal ports cannot claim a host binding");
+  }
+};
+
+const validateRuntime = (service, expected, path) => {
+  const runtime = service.runtime;
+  requireExactKeys(runtime, ["commit", "image", "schema", "configuration", "volumes", "networks", "ports"], `${path}.runtime`);
+
+  requireExactKeys(runtime.commit, ["value", "evidence_source"], `${path}.runtime.commit`);
+  const commit = requireString(runtime.commit.value, `${path}.runtime.commit.value`);
+  requireString(runtime.commit.evidence_source, `${path}.runtime.commit.evidence_source`);
+  if (commit !== UNKNOWN && !SHA_PATTERN.test(commit)) fail(`${path}.runtime.commit.value`, "must be NOT VERIFIED or a full Git SHA");
+  if (commit !== UNKNOWN && runtime.commit.evidence_source === UNKNOWN) fail(`${path}.runtime.commit.evidence_source`, "must identify runtime evidence for a verified commit");
+
+  requireExactKeys(runtime.image, ["reference", "digest", "evidence_source"], `${path}.runtime.image`);
+  requireString(runtime.image.reference, `${path}.runtime.image.reference`);
+  const digest = requireString(runtime.image.digest, `${path}.runtime.image.digest`);
+  requireString(runtime.image.evidence_source, `${path}.runtime.image.evidence_source`);
+  if (digest !== UNKNOWN && !DIGEST_PATTERN.test(digest)) fail(`${path}.runtime.image.digest`, "must be NOT VERIFIED or sha256:<64 lowercase hex>");
+  if (digest !== UNKNOWN && runtime.image.evidence_source === UNKNOWN) fail(`${path}.runtime.image.evidence_source`, "must identify runtime evidence for a verified digest");
+
+  requireExactKeys(runtime.schema, ["kind", "version", "evidence_source"], `${path}.runtime.schema`);
+  if (runtime.schema.kind !== expected.schemaKind) fail(`${path}.runtime.schema.kind`, `must be ${expected.schemaKind}`);
+  requireString(runtime.schema.version, `${path}.runtime.schema.version`);
+  requireString(runtime.schema.evidence_source, `${path}.runtime.schema.evidence_source`);
+  if (runtime.schema.kind === "none" && runtime.schema.version !== NOT_APPLICABLE) fail(`${path}.runtime.schema.version`, "must be NOT APPLICABLE for a stateless service");
+  if (runtime.schema.kind !== "none" && runtime.schema.version === NOT_APPLICABLE) fail(`${path}.runtime.schema.version`, "cannot be NOT APPLICABLE for a stateful service");
+
+  requireExactKeys(runtime.configuration, ["status", "fingerprint", "redacted", "safe_keys"], `${path}.runtime.configuration`);
+  if (!new Set([UNKNOWN, "VERIFIED"]).has(runtime.configuration.status)) fail(`${path}.runtime.configuration.status`, "must be NOT VERIFIED or VERIFIED");
+  const fingerprint = requireString(runtime.configuration.fingerprint, `${path}.runtime.configuration.fingerprint`);
+  if (fingerprint !== UNKNOWN && !DIGEST_PATTERN.test(fingerprint)) fail(`${path}.runtime.configuration.fingerprint`, "must be NOT VERIFIED or sha256:<64 lowercase hex>");
+  if (runtime.configuration.status === "VERIFIED" && fingerprint === UNKNOWN) fail(`${path}.runtime.configuration.fingerprint`, "is required when configuration is VERIFIED");
+  if (runtime.configuration.redacted !== true) fail(`${path}.runtime.configuration.redacted`, "must be true");
+  const safeKeys = requireArray(runtime.configuration.safe_keys, `${path}.runtime.configuration.safe_keys`);
+  if (new Set(safeKeys).size !== safeKeys.length) fail(`${path}.runtime.configuration.safe_keys`, "must be unique");
+  for (const [index, key] of safeKeys.entries()) {
+    requireString(key, `${path}.runtime.configuration.safe_keys[${index}]`);
+    if (SENSITIVE_KEY_PATTERN.test(key)) fail(`${path}.runtime.configuration.safe_keys[${index}]`, "secret-like configuration keys are forbidden");
+  }
+
+  requireExactKeys(runtime.volumes, ["declared", "observed"], `${path}.runtime.volumes`);
+  const declaredVolumes = requireArray(runtime.volumes.declared, `${path}.runtime.volumes.declared`);
+  declaredVolumes.forEach((volume, index) => validateVolume(volume, `${path}.runtime.volumes.declared[${index}]`));
+  if (!sameJson(declaredVolumes, expected.volumes)) fail(`${path}.runtime.volumes.declared`, "does not match the service mapping contract");
+  validateObserved(runtime.volumes.observed, `${path}.runtime.volumes.observed`, validateVolume);
+  if (runtime.volumes.observed !== UNKNOWN && !sameJson(runtime.volumes.observed, declaredVolumes)) fail(`${path}.runtime.volumes.observed`, "does not match declared volume mappings");
+
+  requireExactKeys(runtime.networks, ["declared", "observed"], `${path}.runtime.networks`);
+  const declaredNetworks = requireArray(runtime.networks.declared, `${path}.runtime.networks.declared`);
+  if (!sameJson(declaredNetworks, expected.networks)) fail(`${path}.runtime.networks.declared`, "does not match the service mapping contract");
+  validateObserved(runtime.networks.observed, `${path}.runtime.networks.observed`, (network, networkPath) => requireString(network, networkPath));
+  if (runtime.networks.observed !== UNKNOWN && !sameJson(runtime.networks.observed, declaredNetworks)) fail(`${path}.runtime.networks.observed`, "does not match declared networks");
+
+  requireExactKeys(runtime.ports, ["declared", "observed"], `${path}.runtime.ports`);
+  const declaredPorts = requireArray(runtime.ports.declared, `${path}.runtime.ports.declared`);
+  declaredPorts.forEach((port, index) => validatePort(port, `${path}.runtime.ports.declared[${index}]`));
+  const portContract = declaredPorts.map(({ exposure, container_port, protocol }) => ({ exposure, container_port, protocol }));
+  if (!sameJson(portContract, expected.ports)) fail(`${path}.runtime.ports.declared`, "does not match the service mapping contract");
+  validateObserved(runtime.ports.observed, `${path}.runtime.ports.observed`, validatePort);
+  if (runtime.ports.observed !== UNKNOWN) {
+    const observedContract = runtime.ports.observed.map(({ exposure, container_port, protocol }) => ({ exposure, container_port, protocol }));
+    if (!sameJson(observedContract, expected.ports)) fail(`${path}.runtime.ports.observed`, "does not match the service mapping contract");
+  }
+};
+
+export function validateReleaseEvidence(manifest) {
+  requireExactKeys(manifest, ["$schema", "manifest_version", "evidence_id", "environment", "captured_at", "runtime_access", "evidence_status", "source_checkout_notice", "redaction", "services"], "manifest");
+  if (manifest.$schema !== "../schemas/release-evidence.schema.json") fail("manifest.$schema", "must reference the repository schema");
+  if (manifest.manifest_version !== 1) fail("manifest.manifest_version", "must be 1");
+  requireString(manifest.evidence_id, "manifest.evidence_id");
+  requireString(manifest.environment, "manifest.environment");
+  const capturedAt = requireString(manifest.captured_at, "manifest.captured_at");
+  if (capturedAt !== UNKNOWN && Number.isNaN(Date.parse(capturedAt))) fail("manifest.captured_at", "must be NOT VERIFIED or an ISO date-time");
+  if (!new Set(["NOT AUTHORIZED", "READ-ONLY AUTHORIZED"]).has(manifest.runtime_access)) fail("manifest.runtime_access", "has an unsupported value");
+  if (!new Set([UNKNOWN, "VERIFIED"]).has(manifest.evidence_status)) fail("manifest.evidence_status", "has an unsupported value");
+  requireString(manifest.source_checkout_notice, "manifest.source_checkout_notice");
+  requireExactKeys(manifest.redaction, ["secret_values_included", "configuration_values_included"], "manifest.redaction");
+  if (manifest.redaction.secret_values_included !== false) fail("manifest.redaction.secret_values_included", "must remain false");
+  if (manifest.redaction.configuration_values_included !== false) fail("manifest.redaction.configuration_values_included", "must remain false");
+
+  const services = requireArray(manifest.services, "manifest.services");
+  if (services.length !== Object.keys(EXPECTED_SERVICES).length) fail("manifest.services", "must contain exactly P, W, K, L and renderer services");
+  const seen = new Set();
+  for (const [index, service] of services.entries()) {
+    const path = `manifest.services[${index}]`;
+    requireExactKeys(service, ["service_id", "component", "repository", "relationship", "declared_mapping_source", "runtime"], path);
+    const serviceId = requireString(service.service_id, `${path}.service_id`);
+    if (seen.has(serviceId)) fail(`${path}.service_id`, "must be unique");
+    seen.add(serviceId);
+    const expected = EXPECTED_SERVICES[serviceId];
+    if (!expected) fail(`${path}.service_id`, "is not a PR01 service");
+    if (service.component !== expected.component) fail(`${path}.component`, `must be ${expected.component}`);
+    if (service.repository !== expected.repository) {
+      const label = serviceId === "warehouse-label-renderer" ? "renderer repository" : "repository";
+      fail(`${path}.repository`, `${label} must be ${expected.repository}`);
+    }
+    requireString(service.relationship, `${path}.relationship`);
+    if (service.declared_mapping_source !== "compose.prod.yml") fail(`${path}.declared_mapping_source`, "must be compose.prod.yml");
+    validateRuntime(service, expected, path);
+  }
+  for (const serviceId of Object.keys(EXPECTED_SERVICES)) {
+    if (!seen.has(serviceId)) fail("manifest.services", `missing required service ${serviceId}`);
+  }
+
+  const label = services.find((service) => service.service_id === "label-printer");
+  const renderer = services.find((service) => service.service_id === "warehouse-label-renderer");
+  if (label.runtime.commit.value !== renderer.runtime.commit.value) fail("manifest.services", "Label Printer and renderer must have the same runtime commit");
+  if (label.runtime.image.reference !== renderer.runtime.image.reference) fail("manifest.services", "Label Printer and renderer must have the same image reference");
+  if (label.runtime.image.digest !== renderer.runtime.image.digest) fail("manifest.services", "Label Printer and renderer must have the same image digest");
+
+  if (manifest.evidence_status === "VERIFIED") {
+    if (manifest.runtime_access !== "READ-ONLY AUTHORIZED") fail("manifest.runtime_access", "VERIFIED manifest requires read-only authorization");
+    if (manifest.captured_at === UNKNOWN) fail("manifest.captured_at", "VERIFIED manifest requires a capture timestamp");
+    const unknownPath = findUnknown(manifest);
+    if (unknownPath) fail(unknownPath, "VERIFIED manifest cannot contain NOT VERIFIED");
+  }
+
+  return manifest;
+}
+
+function findUnknown(value, path = "manifest") {
+  if (value === UNKNOWN) return path;
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const found = findUnknown(value[index], `${path}[${index}]`);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (isObject(value)) {
+    for (const [key, child] of Object.entries(value)) {
+      const found = findUnknown(child, `${path}.${key}`);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+const invokedPath = process.argv[1] ? pathToFileURL(process.argv[1]).href : null;
+if (invokedPath === import.meta.url) {
+  const manifestPath = process.argv[2];
+  if (!manifestPath) {
+    console.error("Usage: node scripts/validate-release-evidence.mjs <manifest.json>");
+    process.exitCode = 2;
+  } else {
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      validateReleaseEvidence(manifest);
+      console.log(`${manifestPath}: VALID (${manifest.evidence_status})`);
+    } catch (error) {
+      console.error(`${manifestPath}: INVALID: ${error.message}`);
+      process.exitCode = 1;
+    }
+  }
+}

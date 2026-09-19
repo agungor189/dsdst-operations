@@ -20,7 +20,7 @@ her kontrol açıkça **DOĞRULANAMADI** yazılır.
 
 | ID | Başlık | Faz | Öncelik | Repo | Bağımlılık | Kod | Test | Review | Canlıya alma |
 | --- | --- | ---: | --- | --- | --- | --- | --- | --- | --- |
-| PR01 | Read-only runtime ve release kanıt manifesti | 0 | P1 | O | Yok | **BAŞLAMADI** | **DOĞRULANAMADI** | **DOĞRULANAMADI** | **YETKİ YOK** |
+| PR01 | Read-only runtime ve release kanıt manifesti | 0 | P1 | O | Yok | **HAZIR** | **PASS** | **BEKLİYOR** | **YETKİ YOK** |
 | PR02 | Kit DB tutarlı snapshot ve backup-set manifesti | 0 | P1 | O + K | PR01 | BAŞLAMADI | DOĞRULANAMADI | DOĞRULANAMADI | YETKİ YOK |
 | PR03 | Exact business invariant test oracle | 1 | P0 | O + P/K/L | PR01 | BAŞLAMADI | DOĞRULANAMADI | DOĞRULANAMADI | YETKİ YOK |
 | PR04 | Uploads dışı silmeyi kapat | 2 | P0 | P | PR03 | BAŞLAMADI | DOĞRULANAMADI | DOĞRULANAMADI | YETKİ YOK |
@@ -51,7 +51,9 @@ her kontrol açıkça **DOĞRULANAMADI** yazılır.
 | PR29 | Bağımsız cross-system re-audit E2E | 12 | P0 | O + bütün ilgili repolar | PR04–PR28 ilgili gerekli işler | BAŞLAMADI | DOĞRULANAMADI | DOĞRULANAMADI | YETKİ YOK |
 | PR30 | Pilot runbook ve günlük kontrol | 13 | P1 | O / operasyon | PR29 + açık pilot onayı | BAŞLAMADI | DOĞRULANAMADI | DOĞRULANAMADI | YETKİ YOK |
 
-PR01 bu hazırlıkta başlatılmadı.
+PR01 `codex/pr01-release-evidence` dalında hazırlandı. Bağımsız review ve insan
+kabulü beklediğinden henüz `KABUL EDİLDİ` değildir; PR02 kendiliğinden
+başlatılmadı.
 
 ## Bağımlılık ve release kapıları
 
@@ -142,5 +144,17 @@ Sonraki görev başlangıcında:
 
 ## Görev sonuçları
 
-Henüz kabul edilmiş hardening görevi yoktur. İlk kayıt, kullanıcı PR01'i ayrıca
-yetkilendirdikten ve görev tamamlanıp review edildikten sonra eklenecektir.
+### PR01 — Review bekliyor
+
+- Kod: `HAZIR`
+- Test: `PASS` — manifest doğrulama, 7 fixture testi, JSON parse, ShellCheck ve
+  shell syntax
+- Review: `BEKLİYOR`; bağımsız review yapılmadı
+- Canlıya alma: `YETKİ YOK`; deploy/restart/migration çalıştırılmadı
+- Runtime commit/image/schema/config/volume/network/port kanıtı: **NOT VERIFIED**
+- Veri etkisi: Yok
+- Kod rollbacki: PR01 commit revert
+- Veri rollbacki: Gerekmez; veri yazısı yok
+
+Kabul edilmiş hardening görevi henüz yoktur. PR01 insan review/kabulünden sonra
+exact O commit SHA'sı kabul manifestine eklenecektir.

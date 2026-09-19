@@ -1,0 +1,49 @@
+{
+  "invalid_cases": [
+    {
+      "name": "missing runtime commit SHA field",
+      "operations": [
+        { "op": "delete", "service": "dsdst-panel", "path": "runtime.commit.value" }
+      ],
+      "error": "runtime.commit.value"
+    },
+    {
+      "name": "missing image digest field",
+      "operations": [
+        { "op": "delete", "service": "dsdst-warehouse", "path": "runtime.image.digest" }
+      ],
+      "error": "runtime.image.digest"
+    },
+    {
+      "name": "renderer points to a different repository",
+      "operations": [
+        { "op": "set", "service": "warehouse-label-renderer", "path": "repository", "value": "agungor189/not-label-printer" }
+      ],
+      "error": "renderer repository"
+    },
+    {
+      "name": "renderer and Label Printer have different verified image digests",
+      "operations": [
+        { "op": "set", "service": "label-printer", "path": "runtime.image.digest", "value": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+        { "op": "set", "service": "label-printer", "path": "runtime.image.evidence_source", "value": "docker image inspect" },
+        { "op": "set", "service": "warehouse-label-renderer", "path": "runtime.image.digest", "value": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
+        { "op": "set", "service": "warehouse-label-renderer", "path": "runtime.image.evidence_source", "value": "docker image inspect" }
+      ],
+      "error": "same image digest"
+    },
+    {
+      "name": "secret-like configuration key in the redacted manifest",
+      "operations": [
+        { "op": "set", "service": "dsdst-panel", "path": "runtime.configuration.safe_keys", "value": ["NODE_ENV", "JWT_SECRET"] }
+      ],
+      "error": "secret-like configuration keys"
+    },
+    {
+      "name": "verified status cannot contain unknown commit",
+      "operations": [
+        { "op": "set", "path": "evidence_status", "value": "VERIFIED" }
+      ],
+      "error": "VERIFIED manifest"
+    }
+  ]
+}

@@ -1,0 +1,169 @@
+{
+  "$schema": "../schemas/release-evidence.schema.json",
+  "manifest_version": 1,
+  "evidence_id": "dsdst-production-release-NOT-VERIFIED-2026-09-19",
+  "environment": "production",
+  "captured_at": "NOT VERIFIED",
+  "runtime_access": "NOT AUTHORIZED",
+  "evidence_status": "NOT VERIFIED",
+  "source_checkout_notice": "Repository checkout SHAs are reference-only and are not runtime evidence.",
+  "redaction": {
+    "secret_values_included": false,
+    "configuration_values_included": false
+  },
+  "services": [
+    {
+      "service_id": "dsdst-panel",
+      "component": "P",
+      "repository": "agungor189/panel-kit-yonetimi",
+      "relationship": "application service",
+      "declared_mapping_source": "compose.prod.yml",
+      "runtime": {
+        "commit": { "value": "NOT VERIFIED", "evidence_source": "NOT VERIFIED" },
+        "image": { "reference": "NOT VERIFIED", "digest": "NOT VERIFIED", "evidence_source": "NOT VERIFIED" },
+        "schema": { "kind": "sqlite", "version": "NOT VERIFIED", "evidence_source": "NOT VERIFIED" },
+        "configuration": {
+          "status": "NOT VERIFIED",
+          "fingerprint": "NOT VERIFIED",
+          "redacted": true,
+          "safe_keys": ["NODE_ENV", "PORT", "DB_PATH", "BACKUP_DIR", "APP_URL", "ALLOWED_ORIGINS", "LABEL_RENDERER_URL", "WAREHOUSE_PRINT_DRY_RUN", "CUPS_SERVER", "CLOUD_BACKUP_ENABLED"]
+        },
+        "volumes": {
+          "declared": [
+            { "source_alias": "PANEL_DATA_DIR", "target": "/data", "mode": "rw" },
+            { "source_alias": "PANEL_UPLOADS_DIR", "target": "/app/uploads", "mode": "rw" },
+            { "source_alias": "PANEL_BACKUP_DIR", "target": "/backups", "mode": "rw" }
+          ],
+          "observed": "NOT VERIFIED"
+        },
+        "networks": { "declared": ["edge", "internal"], "observed": "NOT VERIFIED" },
+        "ports": {
+          "declared": [
+            { "exposure": "published", "host_ip": "${BIND_ADDRESS:-127.0.0.1}", "host_port": "${PANEL_PORT:-3000}", "container_port": 3000, "protocol": "tcp" }
+          ],
+          "observed": "NOT VERIFIED"
+        }
+      }
+    },
+    {
+      "service_id": "dsdst-warehouse",
+      "component": "W",
+      "repository": "agungor189/Dsdst-Warehouse",
+      "relationship": "application service",
+      "declared_mapping_source": "compose.prod.yml",
+      "runtime": {
+        "commit": { "value": "NOT VERIFIED", "evidence_source": "NOT VERIFIED" },
+        "image": { "reference": "NOT VERIFIED", "digest": "NOT VERIFIED", "evidence_source": "NOT VERIFIED" },
+        "schema": { "kind": "none", "version": "NOT APPLICABLE", "evidence_source": "compose.prod.yml" },
+        "configuration": {
+          "status": "NOT VERIFIED",
+          "fingerprint": "NOT VERIFIED",
+          "redacted": true,
+          "safe_keys": ["NODE_ENV", "PORT", "PANEL_API_BASE_URL", "LABEL_RENDERER_URL", "COOKIE_SECURE", "TRUST_PROXY_HOPS"]
+        },
+        "volumes": { "declared": [], "observed": "NOT VERIFIED" },
+        "networks": { "declared": ["edge", "internal"], "observed": "NOT VERIFIED" },
+        "ports": {
+          "declared": [
+            { "exposure": "published", "host_ip": "${BIND_ADDRESS:-127.0.0.1}", "host_port": "${WAREHOUSE_PORT:-3006}", "container_port": 3006, "protocol": "tcp" }
+          ],
+          "observed": "NOT VERIFIED"
+        }
+      }
+    },
+    {
+      "service_id": "dsdst-kit-studio",
+      "component": "K",
+      "repository": "agungor189/dsdst-kit-studio",
+      "relationship": "application service",
+      "declared_mapping_source": "compose.prod.yml",
+      "runtime": {
+        "commit": { "value": "NOT VERIFIED", "evidence_source": "NOT VERIFIED" },
+        "image": { "reference": "NOT VERIFIED", "digest": "NOT VERIFIED", "evidence_source": "NOT VERIFIED" },
+        "schema": { "kind": "sqlite", "version": "NOT VERIFIED", "evidence_source": "NOT VERIFIED" },
+        "configuration": {
+          "status": "NOT VERIFIED",
+          "fingerprint": "NOT VERIFIED",
+          "redacted": true,
+          "safe_keys": ["NODE_ENV", "PORT", "DB_PATH", "UPLOAD_DIR", "PANEL_API_URL", "ALLOWED_ORIGINS", "TRUST_PROXY_HOPS"]
+        },
+        "volumes": {
+          "declared": [
+            { "source_alias": "KIT_STUDIO_DATA_DIR", "target": "/data", "mode": "rw" },
+            { "source_alias": "KIT_STUDIO_UPLOADS_DIR", "target": "/app/uploads", "mode": "rw" }
+          ],
+          "observed": "NOT VERIFIED"
+        },
+        "networks": { "declared": ["edge", "internal"], "observed": "NOT VERIFIED" },
+        "ports": {
+          "declared": [
+            { "exposure": "published", "host_ip": "${BIND_ADDRESS:-127.0.0.1}", "host_port": "${KIT_STUDIO_PORT:-3012}", "container_port": 3012, "protocol": "tcp" }
+          ],
+          "observed": "NOT VERIFIED"
+        }
+      }
+    },
+    {
+      "service_id": "label-printer",
+      "component": "L",
+      "repository": "agungor189/Label-Printer",
+      "relationship": "application service and renderer image source",
+      "declared_mapping_source": "compose.prod.yml",
+      "runtime": {
+        "commit": { "value": "NOT VERIFIED", "evidence_source": "NOT VERIFIED" },
+        "image": { "reference": "NOT VERIFIED", "digest": "NOT VERIFIED", "evidence_source": "NOT VERIFIED" },
+        "schema": { "kind": "json-state", "version": "NOT VERIFIED", "evidence_source": "NOT VERIFIED" },
+        "configuration": {
+          "status": "NOT VERIFIED",
+          "fingerprint": "NOT VERIFIED",
+          "redacted": true,
+          "safe_keys": ["NODE_ENV", "PORT", "DATA_DIR", "STATE_FILE", "PANEL_API_URL", "COOKIE_SECURE", "TRUST_PROXY_HOPS"]
+        },
+        "volumes": {
+          "declared": [
+            { "source_alias": "LABEL_PRINTER_DATA_DIR", "target": "/app/data", "mode": "rw" }
+          ],
+          "observed": "NOT VERIFIED"
+        },
+        "networks": { "declared": ["edge", "internal"], "observed": "NOT VERIFIED" },
+        "ports": {
+          "declared": [
+            { "exposure": "published", "host_ip": "${BIND_ADDRESS:-127.0.0.1}", "host_port": "${LABEL_PRINTER_PORT:-3013}", "container_port": 3000, "protocol": "tcp" }
+          ],
+          "observed": "NOT VERIFIED"
+        }
+      }
+    },
+    {
+      "service_id": "warehouse-label-renderer",
+      "component": "renderer",
+      "repository": "agungor189/Label-Printer",
+      "relationship": "L-sourced internal renderer; shares the exact L image and label state read-only",
+      "declared_mapping_source": "compose.prod.yml",
+      "runtime": {
+        "commit": { "value": "NOT VERIFIED", "evidence_source": "NOT VERIFIED" },
+        "image": { "reference": "NOT VERIFIED", "digest": "NOT VERIFIED", "evidence_source": "NOT VERIFIED" },
+        "schema": { "kind": "none", "version": "NOT APPLICABLE", "evidence_source": "compose.prod.yml" },
+        "configuration": {
+          "status": "NOT VERIFIED",
+          "fingerprint": "NOT VERIFIED",
+          "redacted": true,
+          "safe_keys": ["NODE_ENV", "LABEL_RENDERER_PORT", "DATA_DIR", "STATE_FILE"]
+        },
+        "volumes": {
+          "declared": [
+            { "source_alias": "LABEL_PRINTER_DATA_DIR", "target": "/app/data", "mode": "ro" }
+          ],
+          "observed": "NOT VERIFIED"
+        },
+        "networks": { "declared": ["internal"], "observed": "NOT VERIFIED" },
+        "ports": {
+          "declared": [
+            { "exposure": "internal", "host_ip": "NOT APPLICABLE", "host_port": "NOT APPLICABLE", "container_port": 3010, "protocol": "tcp" }
+          ],
+          "observed": "NOT VERIFIED"
+        }
+      }
+    }
+  ]
+}

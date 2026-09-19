@@ -107,6 +107,17 @@ komuttur. GitHub protected environment, harici host cron/webhook ve branch
 protection ayarları **DOĞRULANAMADI**; her uygulama görevi öncesinde yeniden
 kontrol edilir.
 
+### D-013 — Checkout SHA ile runtime commit ayrı kanıtlardır
+
+**Durum:** Kabul — PR01 kullanıcı talebi, 2026-09-19
+
+`git HEAD`, audit SHA veya remote branch çalışan sürüm olarak kaydedilmez.
+Runtime commit yalnız çalışan image'ın OCI revision/provenance kanıtından;
+image digest yalnız registry RepoDigest kanıtından doldurulur. Kanıt yoksa alan
+silinmez veya tahmin edilmez, `NOT VERIFIED` kalır. Redaksiyonlu manifest
+secret/config değerlerini değil yalnız güvenli yapı anahtarlarını ve hash'i
+tutar.
+
 ## Karar bekleyen iş politikaları
 
 Aşağıdakiler onaylanmış çözüm kabul edilmez. İlgili görevde koddan önce karar

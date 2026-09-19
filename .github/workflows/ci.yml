@@ -13,6 +13,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Release evidence contract
+        run: |
+          node scripts/validate-release-evidence.mjs evidence/release-evidence.redacted.json
+          node --test tests/release-evidence.test.mjs
       - name: Shell syntax
         run: |
           shellcheck scripts/*.sh
