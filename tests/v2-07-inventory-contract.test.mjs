@@ -102,6 +102,23 @@ test("Panel owns the V2-07 receipt, reservation, FIFO, fulfillment, and dispatch
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
 
+test("Panel real sale lifecycle uses canonical reservations and legacy stock writes fail closed", () => {
+  const server = fs.readFileSync(path.join(panelRoot, "server.ts"), "utf8");
+  const migrations = fs.readFileSync(path.join(panelRoot, "server", "migrations", "runner.ts"), "utf8");
+  const integration = fs.readFileSync(path.join(panelRoot, "server", "routes", "salesInventoryIntegration.test.ts"), "utf8");
+
+  assert.match(server, /app\.post\("\/api\/sales", requireInventoryReserve/);
+  assert.match(server, /inventoryService\.reserveOrder\(\{/);
+  assert.match(server, /reservationByProduct\.set\(movement\.product_id, aggregated\)/);
+  assert.match(server, /inventoryService\.releaseReservation\(\{/);
+  assert.match(server, /DISPATCHED_NO_RESTOCK/);
+  assert.match(server, /STOCK_ADJUSTMENT_REQUIRES_LOT_CORRECTION/);
+  assert.doesNotMatch(server, /applySaleStockDeduction|restoreSaleStock|UPDATE products SET central_stock/);
+  assert.match(migrations, /version: 70[\s\S]*guard_unrepresented_legacy_inventory/);
+  assert.match(migrations, /INVENTORY_MIGRATION_REQUIRED/);
+  assert.match(integration, /real \/api\/sales reserves aggregated BOM inventory/);
+});
+
 test("Warehouse exposes only the V2-07 Panel BFF contract and retains no inventory authority", () => {
   const server = fs.readFileSync(path.join(warehouseRoot, "server", "app.ts"), "utf8");
   const client = fs.readFileSync(path.join(warehouseRoot, "src", "lib", "api.ts"), "utf8");
