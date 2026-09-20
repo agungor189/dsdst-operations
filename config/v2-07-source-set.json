@@ -2,7 +2,7 @@
   "schemaVersion": "dsdst.test-source-set.v1",
   "release": "V2-07",
   "repositories": [
-    { "id": "O", "repository": "agungor189/dsdst-operations", "contextEnv": "OPERATIONS_CONTEXT", "revision": "508c523eb65c2be95593a282af20ec57f220ea76" },
+    { "id": "O", "repository": "agungor189/dsdst-operations", "contextEnv": "OPERATIONS_CONTEXT", "revision": "b861f22ab370b76466d1e18e126c470a8958bad3" },
     { "id": "P", "repository": "agungor189/panel-kit-yonetimi", "contextEnv": "PANEL_CONTEXT", "revision": "d11559ae14dbba8ca52c8eedce6ee9f5a4b65795" },
     { "id": "W", "repository": "agungor189/Dsdst-Warehouse", "contextEnv": "WAREHOUSE_CONTEXT", "revision": "398b7e17a6e7427e9a390503b4f9cf684f1b2918" },
     { "id": "K", "repository": "agungor189/dsdst-kit-studio", "contextEnv": "KIT_STUDIO_CONTEXT", "revision": "2337bd4d86c47e143d3cabaf830a869932bb0968" },

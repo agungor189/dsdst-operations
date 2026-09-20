@@ -19,7 +19,7 @@ test("V2-07 source set declares exact immutable O/P/W/K/L revisions", () => {
   for (const id of ["O", "P", "W", "K", "L"]) assert.match(byId.get(id).revision, /^[a-f0-9]{40}$/);
   assert.equal(byId.get("HUB").role, "auxiliary-e2e-dependency");
   assert.deepEqual(Object.fromEntries(["O", "P", "W", "K", "L"].map((id) => [id, byId.get(id).revision])), {
-    O: "508c523eb65c2be95593a282af20ec57f220ea76",
+    O: "b861f22ab370b76466d1e18e126c470a8958bad3",
     P: "d11559ae14dbba8ca52c8eedce6ee9f5a4b65795",
     W: "398b7e17a6e7427e9a390503b4f9cf684f1b2918",
     K: "2337bd4d86c47e143d3cabaf830a869932bb0968",
