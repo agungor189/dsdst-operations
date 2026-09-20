@@ -131,9 +131,14 @@ Collector Panel ve Kit Studio SQLite dosyalarını `readonly: true` ve
 `fileMustExist: true` ile açıp yalnız son migration version alanını; Label
 Printer state dosyasından yalnız version alanını okur. Sorgu başarısızsa, version
 yoksa veya sonuç beklenen şekilden saparsa capture başarısız olur. Stateful
-serviste `compose.prod.yml` schema kanıtı değildir. W ve renderer bağımsız kalıcı
-şema sahibi değildir; collector bunları `none` / `NOT APPLICABLE` olarak aynı
-capture kaydına bağlar.
+servislerde probe yolu aynı exact container inspect kaydındaki authoritative
+runtime config'ten çözülür: Panel ve Kit Studio için `DB_PATH`, Label Printer
+için `DATA_DIR` ile `STATE_FILE`. Yol ilgili beklenen persistent mount sınırının
+altında değilse, config eksik/geçersizse veya mount eşleşmiyorsa collector
+fail-closed durur. Yol ve config değerleri evidence çıktısına yazılmaz.
+`compose.prod.yml` veya hardcoded varsayılan yol schema kanıtı değildir. W ve
+renderer bağımsız kalıcı şema sahibi değildir; collector bunları `none` /
+`NOT APPLICABLE` olarak aynı capture kaydına bağlar.
 
 ## Yasak toplama biçimleri
 

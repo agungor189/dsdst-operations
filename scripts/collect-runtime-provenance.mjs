@@ -2,6 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { posix as path } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { fingerprintEnvironment } from "./fingerprint-release-config.mjs";
@@ -12,9 +13,8 @@ const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const NOT_APPLICABLE = "NOT APPLICABLE";
 
 const SCHEMA_PROBES = {
-  "dsdst-panel": `const Database=require("better-sqlite3");const db=new Database("/data/dsdst_panel.db",{readonly:true,fileMustExist:true});try{const row=db.prepare("SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1").get();if(!row||row.version===undefined||row.version===null)process.exit(2);process.stdout.write(JSON.stringify({version:String(row.version)}));}finally{db.close();}`,
-  "dsdst-kit-studio": `const Database=require("better-sqlite3");const db=new Database("/data/dsdst-kit-studio.db",{readonly:true,fileMustExist:true});try{const row=db.prepare("SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1").get();if(!row||row.version===undefined||row.version===null)process.exit(2);process.stdout.write(JSON.stringify({version:String(row.version)}));}finally{db.close();}`,
-  "label-printer": `const fs=require("node:fs");const state=JSON.parse(fs.readFileSync("/app/data/app-state.json","utf8"));if(state.version===undefined||state.version===null||String(state.version).length===0)process.exit(2);process.stdout.write(JSON.stringify({version:String(state.version)}));`,
+  sqlite: `const Database=require("better-sqlite3");const db=new Database(process.argv[1],{readonly:true,fileMustExist:true});try{const row=db.prepare("SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1").get();if(!row||row.version===undefined||row.version===null)process.exit(2);process.stdout.write(JSON.stringify({version:String(row.version)}));}finally{db.close();}`,
+  "json-state": `const fs=require("node:fs");const state=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(state.version===undefined||state.version===null||String(state.version).length===0)process.exit(2);process.stdout.write(JSON.stringify({version:String(state.version)}));`,
 };
 
 const fail = (message) => {
@@ -45,15 +45,71 @@ const normalizeSourceRepository = (source) => {
   return source.replace(/^https:\/\/github\.com\//, "").replace(/\.git$/, "").replace(/\/$/, "");
 };
 
-export const collectSchemaObservation = (policy, containerId, runDocker) => {
+const runtimeConfigValue = (policy, container, key) => {
+  const environment = container?.Config?.Env;
+  if (!Array.isArray(environment)) fail(`runtime configuration is unavailable for ${policy.service_id}`);
+  const matches = environment.filter((entry) => typeof entry === "string" && entry.startsWith(`${key}=`));
+  if (matches.length !== 1) fail(`authoritative runtime path configuration is invalid for ${policy.service_id}`);
+  const value = matches[0].slice(key.length + 1);
+  if (value.length === 0 || value.includes("\0") || value.trim() !== value) {
+    fail(`authoritative runtime path configuration is invalid for ${policy.service_id}`);
+  }
+  return value;
+};
+
+const requirePathInsideMount = (policy, container, candidate, mountTarget) => {
+  if (!path.isAbsolute(candidate) || path.normalize(candidate) !== candidate ||
+      candidate === mountTarget || !candidate.startsWith(`${mountTarget}/`)) {
+    fail(`authoritative runtime state path is outside the expected mount for ${policy.service_id}`);
+  }
+  const expectedMount = policy.volumes.filter((volume) => volume.target === mountTarget);
+  const actualMount = Array.isArray(container?.Mounts)
+    ? container.Mounts.filter((mount) => mount?.Type !== "tmpfs" && mount?.Destination === mountTarget)
+    : [];
+  if (expectedMount.length !== 1 || actualMount.length !== 1) {
+    fail(`authoritative runtime state mount is invalid for ${policy.service_id}`);
+  }
+  const expectedMode = expectedMount[0].mode;
+  const observedMode = actualMount[0].RW === true ? "rw" : actualMount[0].RW === false ? "ro" : null;
+  if (observedMode !== expectedMode || typeof actualMount[0].Type !== "string" ||
+      typeof actualMount[0].Source !== "string" || actualMount[0].Source.length === 0) {
+    fail(`authoritative runtime state mount is invalid for ${policy.service_id}`);
+  }
+  return candidate;
+};
+
+const resolveSchemaPath = (policy, container) => {
+  const schemaPath = policy.schema_path;
+  if (schemaPath === null || typeof schemaPath !== "object" || Array.isArray(schemaPath)) {
+    fail(`authoritative runtime schema path policy is unavailable for ${policy.service_id}`);
+  }
+  let candidate;
+  if (typeof schemaPath.path_key === "string") {
+    candidate = runtimeConfigValue(policy, container, schemaPath.path_key);
+  } else if (typeof schemaPath.directory_key === "string" && typeof schemaPath.filename_key === "string") {
+    const directory = runtimeConfigValue(policy, container, schemaPath.directory_key);
+    const filename = runtimeConfigValue(policy, container, schemaPath.filename_key);
+    if (!path.isAbsolute(directory) || path.normalize(directory) !== directory) {
+      fail(`authoritative runtime state directory is invalid for ${policy.service_id}`);
+    }
+    candidate = path.resolve(directory, filename);
+  } else {
+    fail(`authoritative runtime schema path policy is invalid for ${policy.service_id}`);
+  }
+  return requirePathInsideMount(policy, container, candidate, schemaPath.mount_target);
+};
+
+export const collectSchemaObservation = (policy, containerId, runDocker, container) => {
   if (policy.schema_kind === "none") {
     return {kind: "none", version: NOT_APPLICABLE, evidence_source: "runtime-collector"};
   }
-  const probe = SCHEMA_PROBES[policy.service_id];
+  if (container?.Id !== containerId) fail(`schema container identity does not match ${policy.service_id}`);
+  const probe = SCHEMA_PROBES[policy.schema_kind];
   if (!probe) fail(`no read-only schema probe exists for ${policy.service_id}`);
+  const schemaPath = resolveSchemaPath(policy, container);
   let result;
   try {
-    result = JSON.parse(runDocker(["exec", containerId, "node", "-e", probe]));
+    result = JSON.parse(runDocker(["exec", containerId, "node", "-e", probe, schemaPath]));
   } catch {
     fail(`read-only schema query failed for ${policy.service_id}`);
   }
@@ -167,7 +223,7 @@ export function collectRuntimeProvenance({composeFile, envFile, runDocker = dock
     const revision = labels["org.opencontainers.image.revision"];
     if (sourceRepository !== policy.source_repository) fail(`OCI source repository does not match ${policy.service_id}`);
     if (!SHA.test(revision)) fail(`OCI revision is unavailable for ${policy.service_id}`);
-    const schema = collectSchemaObservation(policy, container.Id, runDocker);
+    const schema = collectSchemaObservation(policy, container.Id, runDocker, container);
     const observations = collectContainerObservations(policy, container, schema);
     services.push({
       service_id: policy.service_id,

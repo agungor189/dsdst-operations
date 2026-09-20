@@ -368,21 +368,91 @@ test("runtime collector derives redacted config and topology observations from o
   assert.equal(JSON.stringify(observation).includes(secretMarker), false);
 });
 
+const panelSchemaContainer = (containerId, dbPath = "/data/dsdst_panel.db") => ({
+  Id: containerId,
+  Config: {Env: [`DB_PATH=${dbPath}`]},
+  Mounts: [{Type: "volume", Source: "/runtime/panel-data", Destination: "/data", RW: true}],
+});
+
 test("runtime collector binds a stateful schema query to the exact container identity", () => {
   const policy = getRuntimeServicePolicies().find((entry) => entry.service_id === "dsdst-panel");
   const containerId = "a".repeat(64);
+  const container = panelSchemaContainer(containerId);
   let calledArgs;
   const schema = collectSchemaObservation(policy, containerId, (args) => {
     calledArgs = args;
     return JSON.stringify({version: "42"});
-  });
+  }, container);
   assert.deepEqual(calledArgs.slice(0, 2), ["exec", containerId]);
   assert.deepEqual(schema, {kind: "sqlite", version: "42", evidence_source: "runtime-collector"});
+  assert.throws(
+    () => collectSchemaObservation(policy, containerId, () => JSON.stringify({version: "42"}), {...container, Id: "b".repeat(64)}),
+    /container identity/i,
+  );
+});
+
+test("runtime collector uses the exact container DB_PATH for the schema probe", () => {
+  const policy = getRuntimeServicePolicies().find((entry) => entry.service_id === "dsdst-panel");
+  const containerId = "a".repeat(64);
+  const container = panelSchemaContainer(containerId, "/data/other.db");
+  let calledArgs;
+  collectSchemaObservation(policy, containerId, (args) => {
+    calledArgs = args;
+    return JSON.stringify({version: "42"});
+  }, container);
+  assert.equal(calledArgs.at(-1), "/data/other.db");
+  assert.equal(calledArgs.join("\n").includes("/data/dsdst_panel.db"), false);
+  assert.throws(
+    () => collectSchemaObservation(policy, containerId, () => JSON.stringify({version: "42"}), panelSchemaContainer(containerId, "/backups/other.db")),
+    /outside the expected mount/i,
+  );
+  assert.throws(
+    () => collectSchemaObservation(policy, containerId, () => JSON.stringify({version: "42"}), {...container, Config: {Env: []}}),
+    /runtime path configuration/i,
+  );
+
+  const kitPolicy = getRuntimeServicePolicies().find((entry) => entry.service_id === "dsdst-kit-studio");
+  const kitContainerId = "b".repeat(64);
+  let kitArgs;
+  collectSchemaObservation(kitPolicy, kitContainerId, (args) => {
+    kitArgs = args;
+    return JSON.stringify({version: "7"});
+  }, {
+    Id: kitContainerId,
+    Config: {Env: ["DB_PATH=/data/alternate-kit.db"]},
+    Mounts: [{Type: "volume", Source: "/runtime/kit-data", Destination: "/data", RW: true}],
+  });
+  assert.equal(kitArgs.at(-1), "/data/alternate-kit.db");
+
+  const labelPolicy = getRuntimeServicePolicies().find((entry) => entry.service_id === "label-printer");
+  const labelContainerId = "c".repeat(64);
+  const labelContainer = {
+    Id: labelContainerId,
+    Config: {Env: ["DATA_DIR=/app/data", "STATE_FILE=alternate-state.json"]},
+    Mounts: [{Type: "volume", Source: "/runtime/label-data", Destination: "/app/data", RW: true}],
+  };
+  let labelArgs;
+  collectSchemaObservation(labelPolicy, labelContainerId, (args) => {
+    labelArgs = args;
+    return JSON.stringify({version: "3"});
+  }, labelContainer);
+  assert.equal(labelArgs.at(-1), "/app/data/alternate-state.json");
+  assert.throws(
+    () => collectSchemaObservation(labelPolicy, labelContainerId, () => JSON.stringify({version: "3"}), {
+      ...labelContainer,
+      Config: {Env: ["DATA_DIR=/app/data", "STATE_FILE=../other-state.json"]},
+    }),
+    /outside the expected mount/i,
+  );
 });
 
 test("runtime collector rejects missing stateful schema query evidence", () => {
   const policy = getRuntimeServicePolicies().find((entry) => entry.service_id === "dsdst-panel");
-  assert.throws(() => collectSchemaObservation(policy, "a".repeat(64), () => JSON.stringify({version: null})), /schema|evidence/i);
+  const containerId = "a".repeat(64);
+  assert.throws(
+    () => collectSchemaObservation(policy, containerId, () => JSON.stringify({version: null}), panelSchemaContainer(containerId)),
+    /schema|evidence/i,
+  );
 });
 
 for (const [name, mutate, error] of [
