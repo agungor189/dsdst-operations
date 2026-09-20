@@ -106,6 +106,9 @@ test("Panel real sale lifecycle uses canonical reservations and legacy stock wri
   const server = fs.readFileSync(path.join(panelRoot, "server.ts"), "utf8");
   const migrations = fs.readFileSync(path.join(panelRoot, "server", "migrations", "runner.ts"), "utf8");
   const integration = fs.readFileSync(path.join(panelRoot, "server", "routes", "salesInventoryIntegration.test.ts"), "utf8");
+  const apiClient = fs.readFileSync(path.join(panelRoot, "src", "lib", "api.ts"), "utf8");
+  const salesForm = fs.readFileSync(path.join(panelRoot, "src", "components", "sales", "SalesForm.tsx"), "utf8");
+  const saleDetail = fs.readFileSync(path.join(panelRoot, "src", "components", "sales", "SaleDetailModal.tsx"), "utf8");
 
   assert.match(server, /app\.post\("\/api\/sales", requireInventoryReserve/);
   assert.match(server, /inventoryService\.reserveOrder\(\{/);
@@ -117,6 +120,11 @@ test("Panel real sale lifecycle uses canonical reservations and legacy stock wri
   assert.match(migrations, /version: 70[\s\S]*guard_unrepresented_legacy_inventory/);
   assert.match(migrations, /INVENTORY_MIGRATION_REQUIRED/);
   assert.match(integration, /real \/api\/sales reserves aggregated BOM inventory/);
+  assert.match(apiClient, /X-Operation-ID/);
+  assert.match(apiClient, /createRetryOperation/);
+  assert.match(apiClient, /X-Operation-ID is required/);
+  assert.match(salesForm, /api\.post\('\/sales', salePayload, \{ operationId \}\)/);
+  assert.match(saleDetail, /api\.put\(`\/sales\/\$\{currentSale\.id\}`, salePayload, \{ operationId \}\)/);
 });
 
 test("Warehouse exposes only the V2-07 Panel BFF contract and retains no inventory authority", () => {
