@@ -13,7 +13,7 @@ const manifest = JSON.parse(fs.readFileSync(path.join(root, "config", "v2-06-sou
 test("V2-06 workflow cannot silently keep accepting the old V2-05 source set", () => {
   const workflow = fs.readFileSync(path.join(root, ".github", "workflows", "e2e.yml"), "utf8");
   assert.equal(fs.existsSync(path.join(root, "config", "v2-06-source-set.json")), true, "V2-06 needs its own immutable source-set manifest");
-  assert.doesNotMatch(workflow, /00a6b281380ffd78814265e51f324f11033e1f09/);
+  assert.doesNotMatch(workflow, /9b02cf736316800e7d2b5341a4d7cd8e13bb6c88/);
   assert.doesNotMatch(workflow, /82aaaf5575e88bc347b4b2d28f81aa59490ccad0/);
   assert.match(workflow, /config\/v2-06-source-set\.json/);
 });
@@ -36,7 +36,7 @@ test("V2-06 source set declares exact immutable O/P/W/K/L revisions", () => {
   assert.equal(byId.get("HUB").role, "auxiliary-e2e-dependency");
   assert.match(byId.get("HUB").revision, /^[a-f0-9]{40}$/);
   assert.deepEqual(Object.fromEntries(["O", "P", "W", "K", "L"].map((id) => [id, byId.get(id).revision])), {
-    O: "9b02cf736316800e7d2b5341a4d7cd8e13bb6c88",
+    O: "c49f2706e5f69b555ef526e7a4fe7d018656008a",
     P: "92386b0ba949ff7be6450c3c68df97212f7408b2",
     W: "a00be0e89cd4871942b7a8eb51e90fe265e7e031",
     K: "2337bd4d86c47e143d3cabaf830a869932bb0968",
