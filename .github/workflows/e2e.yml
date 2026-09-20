@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: agungor189/dsdst-kit-studio
-          ref: 4b1a4aad74c285c11975579666bf771c66e22499
+          ref: f1ffc68696d6f16f7e1eee999d382ebea5b6b112
           path: dsdst-kit-studio
       - uses: actions/checkout@v4
         with:
