@@ -19,12 +19,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: agungor189/dsdst-operations
-          ref: 97a386fd5373985cca3d95a4799cd012d1422ea2
+          ref: 4bcfb51dddf3876d92008c43e78483d9a66bbb49
           path: dsdst-operations
       - uses: actions/checkout@v4
         with:
           repository: agungor189/panel-kit-yonetimi
-          ref: 772b3b3b3212ec2ccec5f482a52e12b228457d26
+          ref: 32c38b5df936796022a39b596676a0c043f6452a
           path: panel-kit-yonetimi
       - uses: actions/checkout@v4
         with:
