@@ -7,8 +7,9 @@ const warehouseUrl = process.env.WAREHOUSE_URL || "http://dsdst-warehouse:3006";
 const labelPrinterUrl = process.env.LABEL_PRINTER_URL || "http://label-printer:3000";
 const kitStudioUrl = process.env.KIT_STUDIO_URL || "http://dsdst-kit-studio:3012";
 const customerHubUrl = process.env.CUSTOMER_HUB_URL || "http://dsdst-customer-hub:3100";
+const warehouseServiceKey = process.env.WAREHOUSE_SERVICE_KEY || "";
 
-const request = async (base, path, { method = "GET", body, token, cookie, expect = 200 } = {}) => {
+const request = async (base, path, { method = "GET", body, token, cookie, apiKey, expect = 200 } = {}) => {
   const response = await fetch(`${base}${path}`, {
     method,
     headers: {
@@ -16,6 +17,7 @@ const request = async (base, path, { method = "GET", body, token, cookie, expect
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(cookie ? { Cookie: cookie } : {}),
+      ...(apiKey ? { "x-api-key": apiKey } : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
@@ -79,6 +81,7 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
       token: initialToken,
       body: { current_password: "admin", new_password: "Operations-E2E-2026!" },
     });
+    await request(panelUrl, "/api/auth/me", { token: initialToken, expect: 401 });
   }
   const panelLogin = await request(panelUrl, "/api/auth/login", {
     method: "POST",
@@ -167,6 +170,15 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
     body: { username: "admin", password: "Operations-E2E-2026!" },
   });
   const warehouseCookie = sessionCookie(warehouseLogin.response);
+  assert.ok(warehouseServiceKey, "Warehouse service key must be available only to the E2E runner");
+  await request(panelUrl, "/api/warehouse/v1/orders", { apiKey: warehouseServiceKey, expect: 401 });
+  const revokedWarehouseLogin = await request(warehouseUrl, "/api/auth/login", {
+    method: "POST",
+    body: { username: "admin", password: "Operations-E2E-2026!" },
+  });
+  const revokedWarehouseCookie = sessionCookie(revokedWarehouseLogin.response);
+  await request(warehouseUrl, "/api/auth/logout", { method: "POST", cookie: revokedWarehouseCookie });
+  await request(warehouseUrl, "/api/orders", { cookie: revokedWarehouseCookie, expect: 401 });
 
   const sku = `OPS-${Date.now()}`;
   const supplierCode = `SUP-${Date.now()}`;

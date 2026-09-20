@@ -186,6 +186,7 @@ services:
       DATA_DIR: /app/data
       STATE_FILE: app-state.json
       PANEL_API_URL: http://dsdst-panel:3000
+      PANEL_API_KEY: ${LABEL_PRINTER_API_KEY:?LABEL_PRINTER_API_KEY is required}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}
       TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
     volumes:

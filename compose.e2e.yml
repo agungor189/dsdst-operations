@@ -3,6 +3,8 @@ services:
     environment:
       NODE_ENV: production
       E2E_WAREHOUSE_API_KEY: ${E2E_WAREHOUSE_API_KEY:?E2E_WAREHOUSE_API_KEY is required}
+      E2E_KIT_STUDIO_API_KEY: ${E2E_KIT_STUDIO_API_KEY:?E2E_KIT_STUDIO_API_KEY is required}
+      E2E_LABEL_PRINTER_API_KEY: ${E2E_LABEL_PRINTER_API_KEY:?E2E_LABEL_PRINTER_API_KEY is required}
       WAREHOUSE_PRINT_DRY_RUN: "true"
       WAREHOUSE_PRINT_WORKER_INTERVAL_MS: 500
     command:
@@ -21,7 +23,7 @@ services:
   dsdst-kit-studio:
     environment:
       NODE_ENV: production
-      PANEL_API_KEY: ${E2E_WAREHOUSE_API_KEY:?E2E_WAREHOUSE_API_KEY is required}
+      PANEL_API_KEY: ${E2E_KIT_STUDIO_API_KEY:?E2E_KIT_STUDIO_API_KEY is required}
       ALLOWED_ORIGINS: http://dsdst-kit-studio:3012
     ports: !reset []
 
@@ -37,6 +39,7 @@ services:
     environment:
       NODE_ENV: production
       COOKIE_SECURE: "false"
+      PANEL_API_KEY: ${E2E_LABEL_PRINTER_API_KEY:?E2E_LABEL_PRINTER_API_KEY is required}
     ports: !reset []
 
   warehouse-label-renderer:
@@ -73,6 +76,7 @@ services:
       LABEL_PRINTER_URL: http://label-printer:3000
       KIT_STUDIO_URL: http://dsdst-kit-studio:3012
       CUSTOMER_HUB_URL: http://dsdst-customer-hub:3100
+      WAREHOUSE_SERVICE_KEY: ${E2E_WAREHOUSE_API_KEY:?E2E_WAREHOUSE_API_KEY is required}
     command: ["node", "--test", "/tests/operations.e2e.mjs"]
     networks:
       - internal

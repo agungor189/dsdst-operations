@@ -22,5 +22,6 @@ test("known-failure registry covers every V2-01 oracle without inventing blocked
     assert.ok(oracle.exactOracle.includes("=="), `${oracle.id} must state an exact equality/status oracle`);
     if (oracle.classification === "DECISION_REQUIRED") assert.ok(oracle.blockedBy?.length > 0);
   }
-  assert.equal(registry.oracles.filter(({ classification }) => classification === "KNOWN_BUSINESS_RED").length, 3);
+  assert.equal(registry.oracles.filter(({ classification }) => classification === "KNOWN_BUSINESS_RED").length, 2);
+  assert.equal(registry.oracles.find(({ id }) => id === "auth.session-revocation")?.classification, "CLOSED_V2_03");
 });

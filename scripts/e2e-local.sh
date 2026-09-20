@@ -22,6 +22,8 @@ RENDERER_PORT=$((BASE_PORT + 3))
 KIT_PORT=$((BASE_PORT + 4))
 CUSTOMER_HUB_PORT=$((BASE_PORT + 5))
 API_KEY=operations-e2e-api-key-not-production
+KIT_API_KEY=operations-e2e-kit-api-key-not-production
+LABEL_API_KEY=operations-e2e-label-api-key-not-production
 RENDERER_KEY=operations-e2e-renderer-key-not-production
 PIDS=""
 
@@ -57,7 +59,8 @@ mkdir -p "$RUNTIME_DIR/panel-backups" "$RUNTIME_DIR/kit-uploads" "$RUNTIME_DIR/l
 
 (cd "$PANEL_REPO" && exec env \
   NODE_ENV=test E2E_ALLOW_SEED=true DB_PATH="$RUNTIME_DIR/panel.db" \
-  E2E_WAREHOUSE_API_KEY="$API_KEY" PANEL_API_HASH_SECRET=operations-e2e-hash-secret-not-production \
+  E2E_WAREHOUSE_API_KEY="$API_KEY" E2E_KIT_STUDIO_API_KEY="$KIT_API_KEY" E2E_LABEL_PRINTER_API_KEY="$LABEL_API_KEY" \
+  PANEL_API_HASH_SECRET=operations-e2e-hash-secret-not-production \
   JWT_SECRET=operations-e2e-jwt-secret-not-production \
   ENCRYPTION_SECRET=operations-e2e-encryption-not-production \
   "$NODE24_BIN" node_modules/tsx/dist/cli.mjs scripts/seedOperationsE2E.ts) >"$RUNTIME_DIR/seed.log" 2>&1
@@ -88,7 +91,7 @@ wait_for panel "http://127.0.0.1:$PANEL_PORT/api/public/health"
 PIDS="$PIDS $!"
 
 (cd "$LABEL_REPO" && exec env NODE_ENV=production PORT="$LABEL_PORT" DATA_DIR="$RUNTIME_DIR/label-data" \
-  PANEL_API_URL="http://127.0.0.1:$PANEL_PORT" COOKIE_SECURE=false \
+  PANEL_API_URL="http://127.0.0.1:$PANEL_PORT" PANEL_API_KEY="$LABEL_API_KEY" COOKIE_SECURE=false \
   "$NODE24_BIN" server.mjs) >"$RUNTIME_DIR/label.log" 2>&1 &
 PIDS="$PIDS $!"
 
@@ -99,7 +102,7 @@ PIDS="$PIDS $!"
 PIDS="$PIDS $!"
 
 (cd "$KIT_REPO" && exec env NODE_ENV=production PORT="$KIT_PORT" DB_PATH="$RUNTIME_DIR/kit.db" \
-  UPLOAD_DIR="$RUNTIME_DIR/kit-uploads" PANEL_API_URL="http://127.0.0.1:$PANEL_PORT" PANEL_API_KEY="$API_KEY" \
+  UPLOAD_DIR="$RUNTIME_DIR/kit-uploads" PANEL_API_URL="http://127.0.0.1:$PANEL_PORT" PANEL_API_KEY="$KIT_API_KEY" \
   ALLOWED_ORIGINS="http://127.0.0.1:$KIT_PORT" \
   "$KIT_NODE_BIN" dist-server/server/index.js) >"$RUNTIME_DIR/kit.log" 2>&1 &
 PIDS="$PIDS $!"
@@ -111,5 +114,5 @@ wait_for customer-hub "http://127.0.0.1:$CUSTOMER_HUB_PORT/api/health"
 
 env PANEL_URL="http://127.0.0.1:$PANEL_PORT" WAREHOUSE_URL="http://127.0.0.1:$WAREHOUSE_PORT" \
   LABEL_PRINTER_URL="http://127.0.0.1:$LABEL_PORT" KIT_STUDIO_URL="http://127.0.0.1:$KIT_PORT" \
-  CUSTOMER_HUB_URL="http://127.0.0.1:$CUSTOMER_HUB_PORT" \
+  CUSTOMER_HUB_URL="http://127.0.0.1:$CUSTOMER_HUB_PORT" WAREHOUSE_SERVICE_KEY="$API_KEY" \
   "$NODE24_BIN" --test "$ROOT_DIR/tests/operations.e2e.mjs"

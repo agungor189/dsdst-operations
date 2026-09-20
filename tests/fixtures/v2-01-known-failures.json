@@ -30,7 +30,7 @@
     },
     {
       "id": "auth.session-revocation",
-      "classification": "KNOWN_BUSINESS_RED",
+      "classification": "CLOSED_V2_03",
       "exactOracle": "pre_logout_token_http_status == 401",
       "executable": "P:server/oracles/sessionRevocation.test.ts"
     },
