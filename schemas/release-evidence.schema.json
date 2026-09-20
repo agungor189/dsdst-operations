@@ -64,11 +64,17 @@
           "oneOf": [
             {"const": "NOT VERIFIED"},
             {"type": "object", "additionalProperties": false,
-             "required": ["kind", "container_id", "image_digest", "revision"],
+             "required": ["kind", "capture_id", "service_id", "compose_service", "container_id", "image_reference", "image_id", "image_digest", "source_repository", "revision"],
              "properties": {
                "kind": {"const": "runtime-oci-revision"},
+               "capture_id": {"type": "string", "pattern": "^runtime-[A-Za-z0-9._:-]+$"},
+               "service_id": {"type": "string", "minLength": 1},
+               "compose_service": {"type": "string", "minLength": 1},
                "container_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+               "image_reference": {"type": "string", "minLength": 1},
+               "image_id": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
                "image_digest": {"type": "string", "pattern": "^sha256:[a-f0-9]{64}$"},
+               "source_repository": {"type": "string", "minLength": 1},
                "revision": {"type": "string", "pattern": "^([a-f0-9]{40}|[a-f0-9]{64})$"}
              }}
           ]
@@ -78,13 +84,19 @@
     "image": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["reference", "digest", "evidence_source"],
+      "required": ["declared_reference", "observed_reference", "image_id", "digest", "source_repository", "evidence_source"],
       "properties": {
-        "reference": { "$ref": "#/$defs/verificationText" },
+        "declared_reference": { "$ref": "#/$defs/verificationText" },
+        "observed_reference": { "$ref": "#/$defs/verificationText" },
+        "image_id": {
+          "type": "string",
+          "pattern": "^(NOT VERIFIED|sha256:[0-9a-f]{64})$"
+        },
         "digest": {
           "type": "string",
           "pattern": "^(NOT VERIFIED|sha256:[0-9a-f]{64})$"
         },
+        "source_repository": { "$ref": "#/$defs/verificationText" },
         "evidence_source": { "$ref": "#/$defs/verificationText" }
       }
     },

@@ -17,20 +17,24 @@ Bu repodaki örnek manifest gerçek runtime kanıtı değildir:
 1. `git rev-parse HEAD`, remote branch SHA'sı, audit SHA'sı veya build context
    SHA'sı tek başına çalışan commit değildir. Runtime commit yalnız çalışan
    image'ın OCI revision label'ından yazılır. `commit.evidence_source` serbest
-   metin değildir: `{kind: "runtime-oci-revision", container_id, image_digest,
-   revision}` nesnesidir. Revision SHA ile, image_digest çalışan image'ın
-   registry digest değeriyle eşleşmelidir. Tam container ID, yetkili capture
-   zamanı ve `READ-ONLY AUTHORIZED` gerekir. Label yoksa SHA `NOT VERIFIED`
-   kalır. Git HEAD dahil başka kaynak türleri reddedilir.
+   metin değildir; collector capture kimliği, Compose service kimliği, tam
+   container ID, image reference/ID/digest, OCI source repository ve revision
+   bağlarını birlikte taşır. Bu alanların tamamı ayrı read-only collector
+   provenance kaydıyla birebir eşleşmelidir. Label veya collector kaydı yoksa
+   SHA `NOT VERIFIED` kalır. Git HEAD dahil başka kaynak türleri reddedilir.
 2. Tag (`latest`, semver veya commit tagı) immutable image digest değildir.
    `runtime.image.digest` yalnız registry `RepoDigest` kanıtından doldurulur.
-   Yerel image ID bir registry digest yerine geçirilmez.
+   Çalışan container'ın immutable image ID'si ayrıca tutulur; image ID registry
+   digest yerine geçirilmez. Compose service label'ı, container'ın declared
+   reference'ı, image'ın aynı reference'ı taşıması ve OCI source repository
+   label'ı servis sözleşmesiyle eşleşmelidir.
 3. Bilinmeyen alan silinmez, boş bırakılmaz ve tahmin edilmez; tam olarak
    `NOT VERIFIED` yazılır. Stateless alanlarda yalnız şemada izin verilen
    `NOT APPLICABLE` kullanılır.
-4. Manifest hiçbir secret veya yapılandırma değeri içermez. Yapılandırma için
-   yalnız izinli anahtar adları ve izinli yapılandırmanın SHA-256 fingerprint'i
-   tutulur; secret değerleri hash girdisine dahi alınmaz.
+4. Manifest hiçbir secret veya yapılandırma değeri içermez. Her servisin izinli
+   config anahtarları validator içinde sabit authoritative allowlist'tir;
+   manifest bu listeyi kuramaz veya genişletemez. Fingerprint collector aynı
+   allowlist'i koddan okur. Allowlist dışındaki değerler hash girdisine alınmaz.
 5. L ve renderer aynı repository, runtime commit, image reference, image digest
    ve label state kaynağını kullanmalıdır. Renderer state'i `ro`, yalnız
    `internal` networkte ve host portu olmadan tüketir.
@@ -40,10 +44,13 @@ Bu repodaki örnek manifest gerçek runtime kanıtı değildir:
    çalıştırmaz. Runtime değiştirildiğinde eski manifest yeni release için
    yeniden kullanılmaz.
 
-Doğrulayıcı çevrimdışı kanıt sözleşmesini denetler; Docker'a bağlanmaz ve
-operatörün ürettiği bir kaydın gerçekliğini kendisi tasdik edemez. `VERIFIED`
-yalnız yetkili operatörün gerçekten topladığı kayıtta kullanılabilir. Sentetik
-pozitif testler production kanıtı değildir.
+Doğrulayıcı gerçek production runtime'a erişmeden fiziksel gerçekliği tek
+başına kanıtlayamaz. Runtime collector/provenance yoksa sonuç `NOT VERIFIED`
+kalır. `VERIFIED` yalnız ayrı collector kaydı mevcutken ve container, Compose
+service, declared/observed image reference, immutable image ID, registry digest,
+OCI source/revision ile bütün servis-spesifik eşleşmeler başarılı olduğunda
+üretilir. Sentetik veya kullanıcı tarafından doldurulmuş manifest tek başına
+`VERIFIED` üretmez; sentetik pozitif testler production kanıtı değildir.
 
 ## Beklenen compose eşlemesi
 
@@ -73,49 +80,35 @@ EVIDENCE_COMPOSE_FILE=/approved/path/dsdst-operations/compose.prod.yml
 EVIDENCE_ENV_FILE=/approved/secret-store/runtime.env
 ```
 
-Servis/container kimliğini oku; bu komut container oluşturmaz veya başlatmaz:
+Servis/container/image provenance kaydını collector ile üret. Collector yalnız
+`docker compose ps`, `docker inspect` ve `docker image inspect` kullanır;
+container oluşturmaz veya başlatmaz. Çıktı manifestten ayrı tutulur:
 
 ```sh
-docker compose --env-file "$EVIDENCE_ENV_FILE" -f "$EVIDENCE_COMPOSE_FILE" ps --status running
-docker compose --env-file "$EVIDENCE_ENV_FILE" -f "$EVIDENCE_COMPOSE_FILE" ps -q dsdst-panel
-docker compose --env-file "$EVIDENCE_ENV_FILE" -f "$EVIDENCE_COMPOSE_FILE" ps -q dsdst-warehouse
-docker compose --env-file "$EVIDENCE_ENV_FILE" -f "$EVIDENCE_COMPOSE_FILE" ps -q dsdst-kit-studio
-docker compose --env-file "$EVIDENCE_ENV_FILE" -f "$EVIDENCE_COMPOSE_FILE" ps -q label-printer
-docker compose --env-file "$EVIDENCE_ENV_FILE" -f "$EVIDENCE_COMPOSE_FILE" ps -q warehouse-label-renderer
+node scripts/collect-runtime-provenance.mjs \
+  "$EVIDENCE_COMPOSE_FILE" "$EVIDENCE_ENV_FILE" \
+  > /approved/redacted/runtime-provenance.json
 ```
 
-Her container için çalışan image ID, beyan edilen image reference, registry
-digest ve OCI revision label'ını ayrı oku. Aşağıdaki `EVIDENCE_CONTAINER_ID`
-yalnız yukarıdaki `ps -q` çıktısından alınır:
-
-```sh
-docker inspect --format '{{.Image}}' "$EVIDENCE_CONTAINER_ID"
-docker inspect --format '{{.Config.Image}}' "$EVIDENCE_CONTAINER_ID"
-docker image inspect "$(docker inspect --format '{{.Image}}' "$EVIDENCE_CONTAINER_ID")" --format '{{json .RepoDigests}}'
-docker image inspect "$(docker inspect --format '{{.Image}}' "$EVIDENCE_CONTAINER_ID")" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'
-```
-
-`RepoDigests` boşsa digest `NOT VERIFIED` kalır. Revision label yoksa local
-repo `HEAD` kullanılmaz; commit `NOT VERIFIED` kalır. OCI revision kanıtı
-container ID ve aynı image'ın registry digest değeriyle birlikte kaydedilir.
+Collector her servis için tek ve tam container ID ister; aynı ID'nin iki
+serviste kullanımını reddeder. `com.docker.compose.service`, `.Config.Image`,
+çalışan immutable `.Image` ID'si, bu ID'nin aynı RepoTag/RepoDigest kaydı ile
+`org.opencontainers.image.source` ve `org.opencontainers.image.revision`
+label'larını birlikte kontrol eder. Farklı kaynak repolar aynı image ID veya
+digest'i paylaşamaz; L ve renderer ise farklı container ID'leriyle aynı
+source/revision/image setini taşımalıdır. Bu bağlardan biri yoksa collector
+başarısız olur ve manifest `NOT VERIFIED` kalır. Local repo `HEAD` kullanılmaz.
 
 Environment değerlerini ekrana vermeden izinli config fingerprint'i üret.
-`EVIDENCE_SERVICE_ID` manifestteki servis ID'sidir. Bu komut O checkout'unda
-çalıştırılır. Ara Docker çıktısına `tee` veya yönlendirme eklenmez:
+`EVIDENCE_SERVICE_ID` manifestteki servis ID'sidir. Collector allowlist'i
+manifestten değil validator policy'sinden alır; manifestin eklediği anahtarlar
+fingerprint girdisine giremez. Ara Docker çıktısına `tee` veya yönlendirme
+eklenmez. `EVIDENCE_CONTAINER_ID`, aynı servisin collector kaydındaki doğrulanmış
+container ID'sidir:
 
 ```sh
 docker inspect --format '{{json .Config.Env}}' "$EVIDENCE_CONTAINER_ID" \
-  | node --input-type=module -e '
-import {readFileSync} from "node:fs";
-import {createHash} from "node:crypto";
-const m=JSON.parse(readFileSync("evidence/release-evidence.redacted.json"));
-const service=m.services.find(s=>s.service_id===process.argv[1]);
-if(!service) process.exit(1);
-let input=""; for await(const c of process.stdin) input+=c;
-const allowed=new Set(service.runtime.configuration.safe_keys);
-const pairs=JSON.parse(input).map(s=>[s.slice(0,s.indexOf("=")),s.slice(s.indexOf("=")+1)]).filter(([k])=>allowed.has(k)).sort(([a],[b])=>a.localeCompare(b));
-console.log("sha256:"+createHash("sha256").update(JSON.stringify(pairs)).digest("hex"));
-' "$EVIDENCE_SERVICE_ID"
+  | node scripts/fingerprint-release-config.mjs "$EVIDENCE_SERVICE_ID"
 ```
 
 Volume kaynak path/name değerlerini göstermeden kaynak kimliğini hashle.
@@ -198,9 +191,11 @@ toplama prosedüründe kullanılmaz:
 
 1. Redaksiyonlu şablon kopyalanır; orijinal şablon korunur.
 2. Her runtime alanı yalnız karşılık gelen salt-okunur kanıtla doldurulur.
-3. Commit kanıtı yukarıdaki yapılandırılmış nesnedir. Image kaynağı yalnız
-   `docker image inspect`, şema kaynağı `read-only schema query` veya stateless
-   servisler için `compose.prod.yml` olur. Bilinmeyenler `NOT VERIFIED` kalır.
+3. Commit ve image alanları collector provenance kaydıyla birebir doldurulur.
+   Source repository, Compose service, container ID, declared/observed image
+   reference, immutable image ID/digest ve OCI revision bağlarından biri eksikse
+   ilgili runtime kanıtı yazılmaz. Şema kaynağı `read-only schema query` veya
+   stateless servisler için `compose.prod.yml` olur.
 4. Gözlenen mount/network/portlar normalize edilerek `observed` alanına yazılır.
 5. Herhangi bir alan eksikse `NOT VERIFIED` bırakılır ve manifest statusü
    değiştirilmez.
@@ -212,9 +207,23 @@ node scripts/validate-release-evidence.mjs evidence/release-evidence.redacted.js
 node --test tests/release-evidence.test.mjs
 ```
 
-Doğrulayıcı eksik commit/digest alanını, eksik servisleri, P/W/K/L/renderer
-repo ve topology sapmasını, L–renderer commit/image farkını, secret benzeri
-config anahtarlarını ve bilinmeyen içeren `VERIFIED` manifesti reddeder.
+Yukarıdaki örnek manifest `NOT VERIFIED` olduğundan provenance dosyası istemez.
+Yetkili runtime kaydının doğrulanması ikinci argümanı zorunlu kullanır:
+
+```sh
+node scripts/validate-release-evidence.mjs \
+  /approved/redacted/release-evidence.json \
+  /approved/redacted/runtime-provenance.json
+```
+
+`VERIFIED` manifest provenance argümanı olmadan reddedilir. Provenance kaydı da
+manifestteki capture zamanı ve her servis alanıyla tam eşleşmelidir.
+
+Doğrulayıcı eksik commit/digest/provenance alanını, yeniden kullanılan container
+kimliğini, yanlış Compose service veya source repository'yi, declared/observed
+image farkını, eksik servisleri, topology sapmasını, L–renderer provenance
+farkını, authoritative config allowlist sapmasını ve bilinmeyen içeren
+`VERIFIED` manifesti reddeder.
 
 ## Bu PR'ın kanıt durumu
 

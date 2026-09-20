@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import { validateReleaseEvidence, validateSchema } from "../scripts/validate-release-evidence.mjs";
+import { fingerprintConfigurationPairs } from "../scripts/fingerprint-release-config.mjs";
 import { createHash } from "node:crypto";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -70,10 +71,46 @@ function verifiedFixture() {
   m.evidence_status = "VERIFIED";
   m.runtime_access = "READ-ONLY AUTHORIZED";
   m.captured_at = "2026-09-19T20:00:00Z";
-  for (const s of m.services) {
+  const captureId = "runtime-synthetic-fixture";
+  const independentImages = [
+    {container: "1", image: "a", digest: "b", revision: "1"},
+    {container: "2", image: "c", digest: "d", revision: "2"},
+    {container: "3", image: "e", digest: "f", revision: "3"},
+    {container: "4", image: "8", digest: "9", revision: "4"},
+    {container: "5", image: "8", digest: "9", revision: "4"},
+  ];
+  const records = [];
+  for (const [index, s] of m.services.entries()) {
     const r = s.runtime;
-    r.commit = {value: "a".repeat(40), evidence_source: {kind: "runtime-oci-revision", container_id: "d".repeat(64), image_digest: "sha256:" + "b".repeat(64), revision: "a".repeat(40)}};
-    r.image = {reference: "registry.invalid/synthetic:fixture", digest: "sha256:" + "b".repeat(64), evidence_source: "docker image inspect"};
+    const identity = independentImages[index];
+    const imageReference = `registry.invalid/${s.service_id === "warehouse-label-renderer" ? "label-printer" : s.service_id}:fixture`;
+    const record = {
+      service_id: s.service_id,
+      compose_service: s.service_id,
+      container_id: identity.container.repeat(64),
+      declared_image_reference: imageReference,
+      observed_image_reference: imageReference,
+      image_id: "sha256:" + identity.image.repeat(64),
+      image_digest: "sha256:" + identity.digest.repeat(64),
+      source_repository: s.repository,
+      revision: identity.revision.repeat(40),
+    };
+    records.push(record);
+    r.commit = {value: record.revision, evidence_source: {
+      kind: "runtime-oci-revision", capture_id: captureId, service_id: s.service_id,
+      compose_service: record.compose_service, container_id: record.container_id,
+      image_reference: record.observed_image_reference, image_id: record.image_id,
+      image_digest: record.image_digest, source_repository: record.source_repository,
+      revision: record.revision,
+    }};
+    r.image = {
+      declared_reference: record.declared_image_reference,
+      observed_reference: record.observed_image_reference,
+      image_id: record.image_id,
+      digest: record.image_digest,
+      source_repository: record.source_repository,
+      evidence_source: "runtime-provenance",
+    };
     if (r.schema.kind !== "none") {r.schema.version = "1"; r.schema.evidence_source = "read-only schema query";}
     r.configuration.status = "VERIFIED";
     r.configuration.fingerprint = "sha256:" + "c".repeat(64);
@@ -82,13 +119,148 @@ function verifiedFixture() {
     r.networks.observed = structuredClone(r.networks.declared);
     r.ports.observed = r.ports.declared.map(p => p.exposure === "internal" ? {...p} : {...p, host_ip: "127.0.0.1", host_port: Number(p.host_port.match(/:-(\d+)/)[1])});
   }
-  return m;
+  return {manifest: m, runtimeProvenance: {
+    provenance_version: 1,
+    capture_id: captureId,
+    captured_at: m.captured_at,
+    collector: "dsdst-read-only-runtime-collector-v1",
+    services: records,
+  }};
 }
 
-test("standard Draft 2020-12 validator accepts unknown and synthetic verified fixtures", () => {
+const validateVerified = ({manifest, runtimeProvenance}) => validateReleaseEvidence(manifest, {runtimeProvenance});
+
+test("standard Draft 2020-12 validator accepts unknown and service-specific synthetic fixtures", () => {
+  const fixture = verifiedFixture();
   validateSchema(baseManifest);
-  validateSchema(verifiedFixture());
-  validateReleaseEvidence(verifiedFixture());
+  validateSchema(fixture.manifest);
+  validateVerified(fixture);
+});
+
+test("rejects one container identity reused by independent services", () => {
+  const fixture = verifiedFixture();
+  fixture.runtimeProvenance.services[1].container_id = fixture.runtimeProvenance.services[0].container_id;
+  fixture.manifest.services[1].runtime.commit.evidence_source.container_id = fixture.runtimeProvenance.services[0].container_id;
+  assert.throws(() => validateVerified(fixture), /container|service|provenance/i);
+});
+
+test("rejects one unrelated image reused by every service", () => {
+  const fixture = verifiedFixture();
+  for (const [index, service] of fixture.manifest.services.entries()) {
+    const record = fixture.runtimeProvenance.services[index];
+    record.declared_image_reference = record.observed_image_reference = "registry.invalid/unrelated:fixture";
+    record.image_id = "sha256:" + "a".repeat(64);
+    record.image_digest = "sha256:" + "b".repeat(64);
+    service.runtime.image.declared_reference = service.runtime.image.observed_reference = record.observed_image_reference;
+    service.runtime.image.image_id = record.image_id;
+    service.runtime.image.digest = record.image_digest;
+    Object.assign(service.runtime.commit.evidence_source, {
+      image_reference: record.observed_image_reference,
+      image_id: record.image_id,
+      image_digest: record.image_digest,
+    });
+  }
+  assert.throws(() => validateVerified(fixture), /image|service|provenance/i);
+});
+
+test("rejects manifest-defined configuration allowlist expansion", () => {
+  const m = structuredClone(baseManifest);
+  m.services[0].runtime.configuration.safe_keys.push("UNLISTED_RUNTIME_SETTING");
+  assert.throws(() => validateReleaseEvidence(m), /configuration|allowlist|safe.keys/i);
+});
+
+test("rejects correct digest attributed to the wrong Compose service", () => {
+  const fixture = verifiedFixture();
+  fixture.runtimeProvenance.services[0].compose_service = "dsdst-warehouse";
+  fixture.manifest.services[0].runtime.commit.evidence_source.compose_service = "dsdst-warehouse";
+  assert.throws(() => validateVerified(fixture), /service|provenance/i);
+});
+
+test("rejects correct service with the wrong observed image", () => {
+  const fixture = verifiedFixture();
+  const service = fixture.manifest.services[0];
+  const record = fixture.runtimeProvenance.services[0];
+  record.observed_image_reference = "registry.invalid/unrelated:fixture";
+  service.runtime.image.observed_reference = record.observed_image_reference;
+  service.runtime.commit.evidence_source.image_reference = record.observed_image_reference;
+  assert.throws(() => validateVerified(fixture), /image|reference/i);
+});
+
+test("rejects correct image with a mismatched OCI revision", () => {
+  const fixture = verifiedFixture();
+  fixture.runtimeProvenance.services[0].revision = "f".repeat(40);
+  fixture.manifest.services[0].runtime.commit.evidence_source.revision = "f".repeat(40);
+  assert.throws(() => validateVerified(fixture), /revision|provenance/i);
+});
+
+test("rejects renderer source provenance mismatch", () => {
+  const fixture = verifiedFixture();
+  const index = 4;
+  fixture.runtimeProvenance.services[index].source_repository = "agungor189/not-label-printer";
+  fixture.manifest.services[index].runtime.image.source_repository = "agungor189/not-label-printer";
+  fixture.manifest.services[index].runtime.commit.evidence_source.source_repository = "agungor189/not-label-printer";
+  assert.throws(() => validateVerified(fixture), /renderer|repository|source|provenance/i);
+});
+
+test("rejects renderer image digest mismatch with Label Printer", () => {
+  const fixture = verifiedFixture();
+  const index = 4;
+  const digest = "sha256:" + "7".repeat(64);
+  fixture.runtimeProvenance.services[index].image_digest = digest;
+  fixture.manifest.services[index].runtime.image.digest = digest;
+  fixture.manifest.services[index].runtime.commit.evidence_source.image_digest = digest;
+  assert.throws(() => validateVerified(fixture), /renderer|label printer|image digest/i);
+});
+
+test("rejects Git HEAD sourced fake revision", () => {
+  const fixture = verifiedFixture();
+  fixture.manifest.services[0].runtime.commit.evidence_source.kind = "git-head";
+  assert.throws(() => validateVerified(fixture), /runtime|provenance|kind/i);
+});
+
+test("rejects VERIFIED manifest without collector provenance", () => {
+  const fixture = verifiedFixture();
+  assert.throws(() => validateReleaseEvidence(fixture.manifest), /collector|runtime.provenance/i);
+});
+
+for (const [name, key] of [
+  ["credential-shaped unknown key", "AKIA" + "A".repeat(16)],
+  ["innocuous but unlisted key", "UNLISTED_FEATURE_FLAG"],
+]) test(`rejects ${name} in safe_keys`, () => {
+  const m = structuredClone(baseManifest);
+  m.services[0].runtime.configuration.safe_keys.push(key);
+  assert.throws(() => validateReleaseEvidence(m), /allowlist|safe.keys/i);
+});
+
+test("rejects a safe key set copied from another service", () => {
+  const m = structuredClone(baseManifest);
+  m.services[1].runtime.configuration.safe_keys = [...m.services[0].runtime.configuration.safe_keys];
+  assert.throws(() => validateReleaseEvidence(m), /allowlist|safe.keys/i);
+});
+
+test("accepts every authoritative service-specific safe key set", () => {
+  assert.doesNotThrow(() => validateReleaseEvidence(structuredClone(baseManifest)));
+});
+
+test("configuration fingerprint rejects an out-of-allowlist input without exposing its value", () => {
+  const pairs = baseManifest.services[0].runtime.configuration.safe_keys.map((key) => [key, "safe-fixture"]);
+  const secretMarker = "do-not-echo-this-fixture-value";
+  pairs[0] = ["UNLISTED_AUTH_FIELD", secretMarker];
+  assert.throws(
+    () => fingerprintConfigurationPairs("dsdst-panel", pairs),
+    (error) => /allowlist/i.test(error.message) && !error.message.includes(secretMarker),
+  );
+});
+
+test("configuration fingerprint rejects a key allowlisted only for another service", () => {
+  const pairs = baseManifest.services[1].runtime.configuration.safe_keys.map((key) => [key, "safe-fixture"]);
+  pairs[0] = ["DB_PATH", "safe-fixture"];
+  assert.throws(() => fingerprintConfigurationPairs("dsdst-warehouse", pairs), /allowlist/i);
+});
+
+test("configuration fingerprint accepts the complete service-specific allowlist", () => {
+  const pairs = baseManifest.services[0].runtime.configuration.safe_keys.map((key) => [key, "safe-fixture"]);
+  assert.match(fingerprintConfigurationPairs("dsdst-panel", pairs), /^sha256:[a-f0-9]{64}$/);
 });
 
 const adversarial = [
@@ -110,7 +282,7 @@ const adversarial = [
   ["unresolved observed port", m => m.services[0].runtime.ports.observed = structuredClone(m.services[0].runtime.ports.declared)],
 ];
 for (const [name, mutate] of adversarial) test(`rejects ${name}`, () => {
-  const m=verifiedFixture(); mutate(m); assert.throws(() => validateReleaseEvidence(m));
+  const fixture=verifiedFixture(); mutate(fixture.manifest); assert.throws(() => validateVerified(fixture));
 });
 
 for (const [name, mutate] of [
@@ -118,7 +290,7 @@ for (const [name, mutate] of [
   ["lowercase config key", m => m.services[0].runtime.configuration.safe_keys=["node_env"]],
   ["numeric port outside range", m => m.services[0].runtime.ports.observed[0].host_port=99999],
 ]) test(`standard schema and CLI both reject ${name}`, () => {
-  const m=verifiedFixture(); mutate(m);
+  const fixture=verifiedFixture(); const m=fixture.manifest; mutate(m);
   assert.throws(() => validateSchema(m));
-  assert.throws(() => validateReleaseEvidence(m));
+  assert.throws(() => validateVerified(fixture));
 });

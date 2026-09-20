@@ -147,12 +147,14 @@ Sonraki görev başlangıcında:
 ### PR01 — Review bekliyor
 
 - Kod: `HAZIR`
-- Test: `PASS` — manifest doğrulama, 32 test (mevcut 7 fixture korunuyor),
+- Test: `PASS` — manifest doğrulama, 49 test (mevcut 7 fixture korunuyor),
   standart Ajv Draft 2020-12 doğrulaması, ShellCheck ve shell syntax
 - Review: İlk bağımsız inceleme `DÜZELTME GEREKİYOR`; düzeltmeler sonrası
   tekrar bağımsız review `BEKLİYOR`. PR01 açık, kabul edilmiş değildir.
 - Canlıya alma: `YETKİ YOK`; deploy/restart/migration çalıştırılmadı
 - Runtime commit/image/schema/config/volume/network/port kanıtı: **NOT VERIFIED**
+- Final remediation: servis-spesifik read-only collector provenance zorunlu;
+  authoritative config allowlist validator ve fingerprint collector içinde sabit
 - Veri etkisi: Yok
 - Kod rollbacki: PR01 commit revert
 - Veri rollbacki: Gerekmez; veri yazısı yok

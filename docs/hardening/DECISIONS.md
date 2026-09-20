@@ -126,6 +126,15 @@ Volume kaynakları path göstermeyen source hash ile karşılaştırılır. Port
 override'ları mevcut varsayılan sözleşmeye sessizce dahil edilmez; ayrı review
 gerektirir. Bu karar PR01'i kapatmaz.
 
+Final remediation: `VERIFIED` bir manifest tek başına kabul edilmez; ayrı
+read-only collector provenance kaydı zorunludur. Kayıt her servis için Compose
+service kimliği, benzersiz container ID, declared/observed image reference,
+immutable image ID, registry digest, OCI source repository ve revision bağlarını
+taşır. Farklı kaynak repolar aynı runtime image identity'yi paylaşamaz; L ve
+renderer farklı container ID'leriyle aynı source/revision/image setini taşır.
+Config fingerprint allowlist'leri manifestten değil servis-spesifik validator
+policy'sinden gelir.
+
 ## Karar bekleyen iş politikaları
 
 Aşağıdakiler onaylanmış çözüm kabul edilmez. İlgili görevde koddan önce karar

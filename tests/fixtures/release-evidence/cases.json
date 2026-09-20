@@ -22,21 +22,19 @@
       "error": "renderer repository"
     },
     {
-      "name": "renderer and Label Printer have different verified image digests",
+      "name": "partial runtime image evidence cannot claim a digest",
       "operations": [
         { "op": "set", "service": "label-printer", "path": "runtime.image.digest", "value": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
-        { "op": "set", "service": "label-printer", "path": "runtime.image.evidence_source", "value": "docker image inspect" },
-        { "op": "set", "service": "warehouse-label-renderer", "path": "runtime.image.digest", "value": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" },
-        { "op": "set", "service": "warehouse-label-renderer", "path": "runtime.image.evidence_source", "value": "docker image inspect" }
+        { "op": "set", "service": "label-printer", "path": "runtime.image.evidence_source", "value": "runtime-provenance" }
       ],
-      "error": "same image digest"
+      "error": "runtime.image"
     },
     {
       "name": "secret-like configuration key in the redacted manifest",
       "operations": [
         { "op": "set", "service": "dsdst-panel", "path": "runtime.configuration.safe_keys", "value": ["NODE_ENV", "JWT_SECRET"] }
       ],
-      "error": "secret-like configuration keys"
+      "error": "authoritative service allowlist"
     },
     {
       "name": "verified status cannot contain unknown commit",
