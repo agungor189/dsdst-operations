@@ -8,6 +8,7 @@ const labelPrinterUrl = process.env.LABEL_PRINTER_URL || "http://label-printer:3
 const kitStudioUrl = process.env.KIT_STUDIO_URL || "http://dsdst-kit-studio:3012";
 const customerHubUrl = process.env.CUSTOMER_HUB_URL || "http://dsdst-customer-hub:3100";
 const warehouseServiceKey = process.env.WAREHOUSE_SERVICE_KEY || "";
+const includeCustomerHub = process.env.E2E_SKIP_AUXILIARY_HUB !== "1";
 
 const request = async (base, path, { method = "GET", body, token, cookie, apiKey, expect = 200 } = {}) => {
   const response = await fetch(`${base}${path}`, {
@@ -17,6 +18,7 @@ const request = async (base, path, { method = "GET", body, token, cookie, apiKey
       ...(body === undefined ? {} : { "Content-Type": "application/json" }),
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(cookie ? { Cookie: cookie } : {}),
+      ...(!["GET", "HEAD"].includes(method) ? { Origin: base } : {}),
       ...(apiKey ? { "x-api-key": apiKey } : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -65,31 +67,35 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
   await request(warehouseUrl, "/health");
   await request(labelPrinterUrl, "/api/health");
   await request(kitStudioUrl, "/api/health");
-  const customerHubHealth = await request(customerHubUrl, "/api/health");
-  assert.equal(customerHubHealth.payload.database, "ok");
-  assert.equal(customerHubHealth.payload.worker, "ok");
+  if (includeCustomerHub) {
+    const customerHubHealth = await request(customerHubUrl, "/api/health");
+    assert.equal(customerHubHealth.payload.database, "ok");
+    assert.equal(customerHubHealth.payload.worker, "ok");
+  }
 
   const initialLogin = await request(panelUrl, "/api/auth/login", {
     method: "POST",
     body: { username: "admin", password: "admin" },
   });
-  const initialToken = initialLogin.payload.token;
-  assert.ok(initialToken);
+  const initialPanelCookie = sessionCookie(initialLogin.response);
+  assert.equal(initialLogin.payload.token, undefined, "Panel login must not expose a browser-readable token");
   if (initialLogin.payload.user.must_change_password) {
     await request(panelUrl, "/api/auth/change-password", {
       method: "POST",
-      token: initialToken,
+      cookie: initialPanelCookie,
       body: { current_password: "admin", new_password: "Operations-E2E-2026!" },
     });
-    await request(panelUrl, "/api/auth/me", { token: initialToken, expect: 401 });
+    await request(panelUrl, "/api/auth/me", { cookie: initialPanelCookie, expect: 401 });
   }
   const panelLogin = await request(panelUrl, "/api/auth/login", {
     method: "POST",
     body: { username: "admin", password: "Operations-E2E-2026!" },
   });
-  const panelToken = panelLogin.payload.token;
+  const panelCookie = sessionCookie(panelLogin.response);
+  assert.equal(panelLogin.payload.token, undefined);
 
-  const customerHubLogin = await request(customerHubUrl, "/api/auth/login", {
+  if (includeCustomerHub) {
+    const customerHubLogin = await request(customerHubUrl, "/api/auth/login", {
     method: "POST",
     body: { username: "admin", password: "Operations-E2E-2026!" },
   });
@@ -158,7 +164,8 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
   });
   assert.equal(sentReply.assigned_user_id, customerHubLogin.payload.user.id);
   assert.ok(sentReply.tags.some((tag) => tag.id === hubTags.payload.items[0].id));
-  assert.ok(sentReply.notes.some((note) => note.text === `Internal note ${hubMarker}`));
+    assert.ok(sentReply.notes.some((note) => note.text === `Internal note ${hubMarker}`));
+  }
 
   const labelLogin = await request(labelPrinterUrl, "/api/auth/login", {
     method: "POST",
@@ -198,12 +205,12 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
   };
   const imported = await request(panelUrl, "/api/products/import", {
     method: "POST",
-    token: panelToken,
+    cookie: panelCookie,
     body: { headers, rows: [row], dry_run: false, source_name: "operations-e2e.csv" },
   });
   assert.equal(imported.payload.applied, true);
 
-  const products = await request(panelUrl, "/api/products", { token: panelToken });
+  const products = await request(panelUrl, "/api/products", { cookie: panelCookie });
   const product = products.payload.find((candidate) => candidate.sku === sku);
   assert.ok(product, "imported product must be discoverable through the Panel product API");
   assert.equal(Number(product.central_stock), 0, "lot import must not pre-receive physical stock");
@@ -298,16 +305,16 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
     cookie: warehouseCookie,
     body: { package_code: pkg.package_code, location_code: "Z9-K1-P1", idempotency_key: `place-${pkg.id}`, device_id: "operations-e2e" },
   });
-  const afterReceiptProducts = await request(panelUrl, "/api/products", { token: panelToken });
+  const afterReceiptProducts = await request(panelUrl, "/api/products", { cookie: panelCookie });
   const stockAfterReceipt = Number(afterReceiptProducts.payload.find((candidate) => candidate.id === product.id).central_stock);
   assert.equal(stockAfterReceipt, 5, "placing one package must increase central stock by its package quantity");
 
-  const accounts = await request(panelUrl, "/api/cash-accounts", { token: panelToken });
+  const accounts = await request(panelUrl, "/api/cash-accounts", { cookie: panelCookie });
   const cashAccount = accounts.payload.find((account) => account.is_active !== 0 && account.type === "cash") || accounts.payload[0];
   assert.ok(cashAccount);
   const sale = await request(panelUrl, "/api/sales", {
     method: "POST",
-    token: panelToken,
+    cookie: panelCookie,
     body: {
       customer_name: "Operations E2E",
       total_quantity: 1,
@@ -319,7 +326,7 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
     },
   });
   assert.ok(sale.payload.id);
-  const afterSaleProducts = await request(panelUrl, "/api/products", { token: panelToken });
+  const afterSaleProducts = await request(panelUrl, "/api/products", { cookie: panelCookie });
   const stockAfterSale = Number(afterSaleProducts.payload.find((candidate) => candidate.id === product.id).central_stock);
 
   const orders = await request(warehouseUrl, "/api/orders", { cookie: warehouseCookie });
@@ -341,7 +348,7 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
   });
   await request(warehouseUrl, `/api/orders/${order.id}/complete`, { method: "POST", cookie: warehouseCookie, body: { note: "operations e2e" } });
 
-  const afterPickProducts = await request(panelUrl, "/api/products", { token: panelToken });
+  const afterPickProducts = await request(panelUrl, "/api/products", { cookie: panelCookie });
   const stockAfterPick = Number(afterPickProducts.payload.find((candidate) => candidate.id === product.id).central_stock);
   assert.deepEqual(
     { stockAfterReceipt, stockAfterSale, stockAfterPick },
