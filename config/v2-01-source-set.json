@@ -11,7 +11,7 @@
       "id": "P",
       "repository": "agungor189/panel-kit-yonetimi",
       "contextEnv": "PANEL_CONTEXT",
-      "revision": "83b7d6f38965096bbbbd68e47a44878247dcf271"
+      "revision": "66601c71dea6541f6cba16a2b74b7e1f8f0d4001"
     },
     {
       "id": "W",
@@ -23,7 +23,7 @@
       "id": "K",
       "repository": "agungor189/dsdst-kit-studio",
       "contextEnv": "KIT_STUDIO_CONTEXT",
-      "revision": "f1ffc68696d6f16f7e1eee999d382ebea5b6b112"
+      "revision": "f6aee117c0ac6ba08002bc3cfc976638d391db85"
     },
     {
       "id": "L",

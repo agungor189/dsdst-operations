@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: agungor189/panel-kit-yonetimi
-          ref: 83b7d6f38965096bbbbd68e47a44878247dcf271
+          ref: 66601c71dea6541f6cba16a2b74b7e1f8f0d4001
           path: panel-kit-yonetimi
       - uses: actions/checkout@v4
         with:
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: agungor189/dsdst-kit-studio
-          ref: f1ffc68696d6f16f7e1eee999d382ebea5b6b112
+          ref: f6aee117c0ac6ba08002bc3cfc976638d391db85
           path: dsdst-kit-studio
       - uses: actions/checkout@v4
         with:
