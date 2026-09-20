@@ -54,6 +54,8 @@ test("Panel accepts both the current topology and a future custom six-position r
 
 test("Panel is the only warehouse authority and Warehouse remains an execution BFF/UI", () => {
   const panelService = fs.readFileSync(path.join(panelRoot, "server", "modules", "warehouse", "warehouseExecutionService.ts"), "utf8");
+  const packageBalance = fs.readFileSync(path.join(panelRoot, "server", "modules", "warehouse", "warehousePackageBalanceService.ts"), "utf8");
+  const inventoryService = fs.readFileSync(path.join(panelRoot, "server", "modules", "inventory", "inventoryService.ts"), "utf8");
   const panelRoutes = fs.readFileSync(path.join(panelRoot, "server", "routes", "warehouseRoutes.ts"), "utf8");
   const migration = fs.readFileSync(path.join(panelRoot, "server", "migrations", "runner.ts"), "utf8");
   const warehouseServer = fs.readFileSync(path.join(warehouseRoot, "server", "app.ts"), "utf8");
@@ -62,6 +64,7 @@ test("Panel is the only warehouse authority and Warehouse remains an execution B
 
   assert.match(migration, /version:\s*71[\s\S]*add_authoritative_warehouse_execution_contract/);
   assert.match(migration, /version:\s*72[\s\S]*persist_warehouse_execution_thresholds/);
+  assert.match(migration, /version:\s*73[\s\S]*close_event_driven_replenishment_runtime/);
   assert.match(panelRoutes, /CommandExecutor/);
   assert.match(panelRoutes, /warehouse\.goods-receipt\.accept\.v1/);
   assert.match(panelRoutes, /warehouse\.package\.move\.v1/);
@@ -69,16 +72,23 @@ test("Panel is the only warehouse authority and Warehouse remains an execution B
   assert.match(panelRoutes, /warehouse\.stock-count\.approve\.v1/);
   assert.match(panelRoutes, /V2_WAREHOUSE_EXECUTION_REQUIRED/);
   assert.match(panelService, /MOVE_CHANGED_ON_HAND/);
-  assert.match(panelService, /EXPECTED_SAME_LOT_RESERVE_NOT_FOUND/);
+  assert.match(packageBalance, /EXPECTED_SAME_LOT_RESERVE_NOT_FOUND/);
+  assert.match(packageBalance, /CRITICAL_NO_RESERVE/);
+  assert.match(packageBalance, /idx_warehouse_replenishment_one_open_pick_lot|OPEN_TASK_STATES/);
+  assert.match(inventoryService, /consumePicking\([\s\S]*operationId/);
   assert.match(panelService, /PARTIAL_RECEIPT_DISABLED/);
   assert.match(panelService, /new InventoryService\(this\.db\)\.receiveCostedLot/);
   assert.doesNotMatch(panelService, /["']C2["']/);
 
   assert.match(warehouseServer, /\/api\/execution\/packages\/\:id\/move/);
+  assert.match(warehouseServer, /\/api\/execution\/replenishments/);
   assert.match(warehouseServer, /forward\(req, res, "POST", `\/execution\/packages\/\$\{encodeURIComponent/);
   assert.match(warehouseClient, /warehouseExecutionApi/);
   assert.match(warehouseClient, /prepareReplenishment/);
+  assert.match(warehouseClient, /listReplenishmentTasks/);
+  assert.match(warehouseClient, /completeReplenishment/);
   assert.match(warehousePages, /export function InboundPage\(\)[\s\S]*warehouseExecutionApi\.receiveGoods/);
   assert.match(warehousePages, /export function LabelingPage\(\)[\s\S]*warehouseExecutionApi\.identifyPackage/);
+  assert.match(warehousePages, /export function ReplenishmentPage\(\)[\s\S]*scannedSource[\s\S]*scanDestination/);
   assert.doesNotMatch(warehouseServer, /better-sqlite3|inventory_ledger_events|UPDATE\s+inventory_lots/i);
 });
