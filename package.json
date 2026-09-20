@@ -1,6 +1,10 @@
 {
   "name": "dsdst-operations-evidence",
   "private": true,
-  "scripts": {"test": "node --test tests/release-evidence.test.mjs"},
+  "scripts": {
+    "test": "node --test tests/release-evidence.test.mjs tests/source-set.test.mjs tests/known-oracles.test.mjs",
+    "test:source-set": "node scripts/verify-source-set.mjs",
+    "test:known-red:e2e": "node --test tests/operations.e2e.mjs"
+  },
   "dependencies": {"ajv": "8.20.0", "ajv-formats": "3.0.1"}
 }

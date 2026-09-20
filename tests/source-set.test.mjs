@@ -1,0 +1,71 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const manifest = JSON.parse(fs.readFileSync(path.join(root, "config", "v2-01-source-set.json"), "utf8"));
+
+test("V2-01 source set declares exact P/W/K/L revisions and self-resolved O", () => {
+  assert.equal(manifest.schemaVersion, "dsdst.test-source-set.v1");
+  const byId = new Map(manifest.repositories.map((entry) => [entry.id, entry]));
+  assert.deepEqual([...byId.keys()].filter((id) => ["O", "P", "W", "K", "L"].includes(id)).sort(), ["K", "L", "O", "P", "W"]);
+  assert.equal(byId.get("O").revision, "SELF");
+  for (const id of ["P", "W", "K", "L"]) assert.match(byId.get(id).revision, /^[a-f0-9]{40}$/);
+  assert.equal(byId.get("HUB").role, "auxiliary-e2e-dependency");
+  assert.match(byId.get("HUB").revision, /^[a-f0-9]{40}$/);
+});
+
+test("E2E workflow checkout refs exactly match the source-set lock", () => {
+  const workflow = fs.readFileSync(path.join(root, ".github", "workflows", "e2e.yml"), "utf8");
+  for (const entry of manifest.repositories.filter(({ revision }) => revision !== "SELF")) {
+    assert.match(workflow, new RegExp(`repository: ${entry.repository.replace("/", "\\/")}\\n\\s+ref: ${entry.revision}`));
+  }
+});
+
+test("source-set verifier fails closed on a wrong SHA and a missing repository", () => {
+  const directory = mkdtempSync(path.join(tmpdir(), "dsdst-source-set-test-"));
+  const actualRevision = spawnSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  const entries = ["O", "P", "W", "K", "L"].map((id) => ({
+    id,
+    repository: "agungor189/dsdst-operations",
+    contextEnv: `${id}_TEST_CONTEXT`,
+    revision: id === "O" ? "SELF" : actualRevision,
+  }));
+  const manifestPath = path.join(directory, "source-set.json");
+  try {
+    writeFileSync(manifestPath, JSON.stringify({ schemaVersion: "dsdst.test-source-set.v1", repositories: entries }));
+    const commonEnv = {
+      ...process.env,
+      SOURCE_SET_MANIFEST: manifestPath,
+      O_TEST_CONTEXT: root,
+      P_TEST_CONTEXT: root,
+      W_TEST_CONTEXT: root,
+      K_TEST_CONTEXT: root,
+      L_TEST_CONTEXT: root,
+    };
+    const valid = spawnSync(process.execPath, [path.join(root, "scripts", "verify-source-set.mjs"), "--allow-dirty"], { encoding: "utf8", env: commonEnv });
+    assert.equal(valid.status, 0, valid.stderr);
+
+    entries[1].revision = "0".repeat(40);
+    writeFileSync(manifestPath, JSON.stringify({ schemaVersion: "dsdst.test-source-set.v1", repositories: entries }));
+    const wrongSha = spawnSync(process.execPath, [path.join(root, "scripts", "verify-source-set.mjs"), "--allow-dirty"], { encoding: "utf8", env: commonEnv });
+    assert.notEqual(wrongSha.status, 0);
+    assert.match(wrongSha.stderr, /P revision mismatch/);
+
+    entries[1].revision = actualRevision;
+    writeFileSync(manifestPath, JSON.stringify({ schemaVersion: "dsdst.test-source-set.v1", repositories: entries }));
+    const missing = spawnSync(process.execPath, [path.join(root, "scripts", "verify-source-set.mjs"), "--allow-dirty"], {
+      encoding: "utf8",
+      env: { ...commonEnv, P_TEST_CONTEXT: path.join(directory, "missing") },
+    });
+    assert.notEqual(missing.status, 0);
+    assert.match(missing.stderr, /Missing git repository for P/);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "dsdst.known-business-oracles.v1",
+  "oracles": [
+    {
+      "id": "inventory.sale-pick-single-effect",
+      "classification": "KNOWN_BUSINESS_RED",
+      "exactOracle": "stock_after_pick == stock_after_sale == stock_after_receipt_until_owner_approved_dispatch",
+      "executable": "tests/operations.e2e.mjs"
+    },
+    {
+      "id": "inventory.reservation-availability",
+      "classification": "ORACLE_DEFINED_IMPLEMENTATION_ABSENT",
+      "exactOracle": "available_base_units == on_hand_base_units - reserved_base_units"
+    },
+    {
+      "id": "sales.sale-time-bom-snapshot",
+      "classification": "ORACLE_DEFINED_IMPLEMENTATION_ABSENT",
+      "exactOracle": "historical_component_quantities == accepted_sale_bom_snapshot_after_master_bom_change"
+    },
+    {
+      "id": "finance.currency-safe-money",
+      "classification": "DECISION_REQUIRED",
+      "exactOracle": "native_currency_total == sum_same_currency_minor_units AND historical_base_total == sum_captured_fx_conversions",
+      "blockedBy": ["accounting/reporting currency", "FX source/fallback/rounding", "tax and profit scope"]
+    },
+    {
+      "id": "returns.refund-is-not-physical-return",
+      "classification": "ORACLE_DEFINED_IMPLEMENTATION_ABSENT",
+      "exactOracle": "refund_on_hand_delta == 0 AND physical_return_on_hand_delta == accepted_return_base_units"
+    },
+    {
+      "id": "auth.session-revocation",
+      "classification": "KNOWN_BUSINESS_RED",
+      "exactOracle": "pre_logout_token_http_status == 401",
+      "executable": "P:server/oracles/sessionRevocation.test.ts"
+    },
+    {
+      "id": "labels.concurrent-template-write",
+      "classification": "KNOWN_BUSINESS_RED",
+      "exactOracle": "second_writer_at_same_revision_http_status == 409 AND first_committed_template_is_preserved",
+      "executable": "L:known-red/templateConcurrency.test.mjs"
+    }
+  ]
+}

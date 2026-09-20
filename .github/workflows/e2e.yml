@@ -17,22 +17,27 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: agungor189/panel-kit-yonetimi
+          ref: 5e3dc7ed36ba1be3894db61d514b38f565ffee98
           path: panel-kit-yonetimi
       - uses: actions/checkout@v4
         with:
           repository: agungor189/Dsdst-Warehouse
+          ref: 901fea0937036e468bbab20cbd61cb54f0d4dd2b
           path: Dsdst-Warehouse
       - uses: actions/checkout@v4
         with:
           repository: agungor189/dsdst-kit-studio
+          ref: 62a22ba67f94c00e35a49e7a566444684aacbdf3
           path: dsdst-kit-studio
       - uses: actions/checkout@v4
         with:
           repository: agungor189/Label-Printer
+          ref: e846c73844d0fa334535a9d104a6f2242408ee0c
           path: Label-Printer
       - uses: actions/checkout@v4
         with:
           repository: agungor189/dsdst-customer-hub
+          ref: f030c29b6ee41765289993fda1e94d1e484b5cac
           path: dsdst-customer-hub
       - name: Run isolated system workflow
         working-directory: dsdst-operations

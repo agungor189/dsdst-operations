@@ -307,6 +307,8 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
     },
   });
   assert.ok(sale.payload.id);
+  const afterSaleProducts = await request(panelUrl, "/api/products", { token: panelToken });
+  const stockAfterSale = Number(afterSaleProducts.payload.find((candidate) => candidate.id === product.id).central_stock);
 
   const orders = await request(warehouseUrl, "/api/orders", { cookie: warehouseCookie });
   const order = orders.payload.data.find((candidate) => candidate.id === sale.payload.id);
@@ -329,5 +331,9 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
 
   const afterPickProducts = await request(panelUrl, "/api/products", { token: panelToken });
   const stockAfterPick = Number(afterPickProducts.payload.find((candidate) => candidate.id === product.id).central_stock);
-  assert.ok(stockAfterPick < stockAfterReceipt, `stock must decrease after sale/pick (${stockAfterReceipt} -> ${stockAfterPick})`);
+  assert.deepEqual(
+    { stockAfterReceipt, stockAfterSale, stockAfterPick },
+    { stockAfterReceipt: 5, stockAfterSale: 5, stockAfterPick: 5 },
+    "KNOWN BUSINESS RED: sale acceptance and internal pick must not post physical OUT before the owner-approved dispatch boundary",
+  );
 });
