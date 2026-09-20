@@ -2,7 +2,7 @@
   "name": "dsdst-operations-evidence",
   "private": true,
   "scripts": {
-    "test": "node --test tests/release-evidence.test.mjs tests/source-set.test.mjs tests/known-oracles.test.mjs tests/v2-03-rollback.test.mjs tests/v2-05-catalog-contract.test.mjs tests/v2-06-procurement-contract.test.mjs",
+    "test": "node --test tests/release-evidence.test.mjs tests/source-set.test.mjs tests/v2-07-source-set.test.mjs tests/known-oracles.test.mjs tests/v2-03-rollback.test.mjs tests/v2-05-catalog-contract.test.mjs tests/v2-06-procurement-contract.test.mjs tests/v2-07-inventory-contract.test.mjs",
     "test:source-set": "node scripts/verify-source-set.mjs",
     "test:known-red:e2e": "node --test tests/operations.e2e.mjs"
   },
