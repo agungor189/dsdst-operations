@@ -4,8 +4,9 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import { validateReleaseEvidence, validateSchema } from "../scripts/validate-release-evidence.mjs";
+import { createRuntimeCaptureId, getRuntimeServicePolicies, validateReleaseEvidence, validateSchema } from "../scripts/validate-release-evidence.mjs";
 import { fingerprintConfigurationPairs } from "../scripts/fingerprint-release-config.mjs";
+import { collectContainerObservations, collectSchemaObservation } from "../scripts/collect-runtime-provenance.mjs";
 import { createHash } from "node:crypto";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -71,7 +72,7 @@ function verifiedFixture() {
   m.evidence_status = "VERIFIED";
   m.runtime_access = "READ-ONLY AUTHORIZED";
   m.captured_at = "2026-09-19T20:00:00Z";
-  const captureId = "runtime-synthetic-fixture";
+  const pendingCaptureId = "runtime-pending-fixture";
   const independentImages = [
     {container: "1", image: "a", digest: "b", revision: "1"},
     {container: "2", image: "c", digest: "d", revision: "2"},
@@ -97,7 +98,7 @@ function verifiedFixture() {
     };
     records.push(record);
     r.commit = {value: record.revision, evidence_source: {
-      kind: "runtime-oci-revision", capture_id: captureId, service_id: s.service_id,
+      kind: "runtime-oci-revision", capture_id: pendingCaptureId, service_id: s.service_id,
       compose_service: record.compose_service, container_id: record.container_id,
       image_reference: record.observed_image_reference, image_id: record.image_id,
       image_digest: record.image_digest, source_repository: record.source_repository,
@@ -111,13 +112,26 @@ function verifiedFixture() {
       source_repository: record.source_repository,
       evidence_source: "runtime-provenance",
     };
-    if (r.schema.kind !== "none") {r.schema.version = "1"; r.schema.evidence_source = "read-only schema query";}
+    if (r.schema.kind !== "none") r.schema.version = "1";
+    r.schema.evidence_source = "runtime-collector";
     r.configuration.status = "VERIFIED";
     r.configuration.fingerprint = "sha256:" + "c".repeat(64);
     for (const volume of r.volumes.declared) volume.source_id = "sha256:" + createHash("sha256").update(volume.source_alias).digest("hex");
     r.volumes.observed = structuredClone(r.volumes.declared);
     r.networks.observed = structuredClone(r.networks.declared);
     r.ports.observed = r.ports.declared.map(p => p.exposure === "internal" ? {...p} : {...p, host_ip: "127.0.0.1", host_port: Number(p.host_port.match(/:-(\d+)/)[1])});
+    Object.assign(record, {
+      schema: structuredClone(r.schema),
+      configuration: structuredClone(r.configuration),
+      volumes: structuredClone(r.volumes.observed),
+      networks: structuredClone(r.networks.observed),
+      ports: structuredClone(r.ports.observed),
+    });
+  }
+  const captureId = createRuntimeCaptureId(m.captured_at, records);
+  for (const [index, record] of records.entries()) {
+    record.capture_id = captureId;
+    m.services[index].runtime.commit.evidence_source.capture_id = captureId;
   }
   return {manifest: m, runtimeProvenance: {
     provenance_version: 1,
@@ -223,6 +237,75 @@ test("rejects VERIFIED manifest without collector provenance", () => {
   assert.throws(() => validateReleaseEvidence(fixture.manifest), /collector|runtime.provenance/i);
 });
 
+for (const observation of ["configuration", "schema", "volumes", "networks", "ports"]) {
+  test(`rejects VERIFIED manifest without collector-bound ${observation} observation`, () => {
+    const fixture = verifiedFixture();
+    delete fixture.runtimeProvenance.services[0][observation];
+    assert.throws(() => validateVerified(fixture), new RegExp(`${observation}|observation|provenance`, "i"));
+  });
+}
+
+test("rejects a fabricated configuration fingerprint absent from the collector record", () => {
+  const fixture = verifiedFixture();
+  fixture.manifest.services[0].runtime.configuration.fingerprint = "sha256:" + "f".repeat(64);
+  assert.throws(() => validateVerified(fixture), /configuration|collector|provenance/i);
+});
+
+test("rejects a fabricated stateful schema version absent from the collector record", () => {
+  const fixture = verifiedFixture();
+  fixture.manifest.services[0].runtime.schema.version = "fabricated-version";
+  assert.throws(() => validateVerified(fixture), /schema|collector|provenance/i);
+});
+
+test("rejects compose.prod.yml as evidence for an observed stateful schema", () => {
+  const fixture = verifiedFixture();
+  fixture.manifest.services[0].runtime.schema.evidence_source = "compose.prod.yml";
+  assert.throws(() => validateVerified(fixture), /schema|runtime collector|read-only/i);
+  assert.throws(() => validateSchema(fixture.manifest));
+});
+
+test("rejects declared volume identities copied into observed without collector agreement", () => {
+  const fixture = verifiedFixture();
+  const fabricated = "sha256:" + "f".repeat(64);
+  fixture.manifest.services[0].runtime.volumes.declared[0].source_id = fabricated;
+  fixture.manifest.services[0].runtime.volumes.observed[0].source_id = fabricated;
+  assert.throws(() => validateVerified(fixture), /volume|collector|provenance/i);
+});
+
+test("rejects a runtime network observation that contradicts a copied manifest claim", () => {
+  const fixture = verifiedFixture();
+  fixture.runtimeProvenance.services[0].networks = ["internal"];
+  assert.throws(() => validateVerified(fixture), /network|capture|observation|provenance/i);
+});
+
+test("rejects a runtime port observation that contradicts a copied manifest claim", () => {
+  const fixture = verifiedFixture();
+  fixture.runtimeProvenance.services[0].ports[0].host_ip = "0.0.0.0";
+  assert.throws(() => validateVerified(fixture), /port|capture|binding|observation|provenance/i);
+});
+
+test("rejects runtime observations attributed to another capture", () => {
+  const fixture = verifiedFixture();
+  fixture.runtimeProvenance.services[0].capture_id = "runtime-" + "f".repeat(64);
+  assert.throws(() => validateVerified(fixture), /capture|provenance/i);
+});
+
+test("rejects valid-looking observation tampering that is not bound into the capture identity", () => {
+  const fixture = verifiedFixture();
+  const fabricated = "sha256:" + "f".repeat(64);
+  fixture.runtimeProvenance.services[0].configuration.fingerprint = fabricated;
+  fixture.manifest.services[0].runtime.configuration.fingerprint = fabricated;
+  assert.throws(() => validateVerified(fixture), /capture|provenance/i);
+});
+
+test("rejects observations rebound to another container identity", () => {
+  const fixture = verifiedFixture();
+  const anotherContainer = "f".repeat(64);
+  fixture.runtimeProvenance.services[0].container_id = anotherContainer;
+  fixture.manifest.services[0].runtime.commit.evidence_source.container_id = anotherContainer;
+  assert.throws(() => validateVerified(fixture), /capture|container|provenance/i);
+});
+
 for (const [name, key] of [
   ["credential-shaped unknown key", "AKIA" + "A".repeat(16)],
   ["innocuous but unlisted key", "UNLISTED_FEATURE_FLAG"],
@@ -261,6 +344,63 @@ test("configuration fingerprint rejects a key allowlisted only for another servi
 test("configuration fingerprint accepts the complete service-specific allowlist", () => {
   const pairs = baseManifest.services[0].runtime.configuration.safe_keys.map((key) => [key, "safe-fixture"]);
   assert.match(fingerprintConfigurationPairs("dsdst-panel", pairs), /^sha256:[a-f0-9]{64}$/);
+});
+
+test("runtime collector derives redacted config and topology observations from one inspected container", () => {
+  const policy = getRuntimeServicePolicies().find((entry) => entry.service_id === "dsdst-panel");
+  const secretMarker = "collector-must-not-emit-this-secret";
+  const container = {
+    Config: {Env: [...policy.safe_keys.map((key) => `${key}=fixture`), `JWT_SECRET=${secretMarker}`]},
+    Mounts: [
+      ...policy.volumes.map((volume, index) => ({Type: "volume", Source: `/runtime/source-${index}`, Destination: volume.target, RW: volume.mode === "rw"})),
+      {Type: "tmpfs", Source: "", Destination: "/tmp", RW: true},
+    ],
+    NetworkSettings: {
+      Networks: {"dsdst-edge": {}, "dsdst-internal": {}},
+      Ports: {"3000/tcp": [{HostIp: "127.0.0.1", HostPort: "3000"}]},
+    },
+  };
+  const observation = collectContainerObservations(policy, container, {kind: "sqlite", version: "1", evidence_source: "runtime-collector"});
+  assert.deepEqual(observation.networks, ["edge", "internal"]);
+  assert.deepEqual(observation.ports, [{exposure: "published", container_port: 3000, protocol: "tcp", host_ip: "127.0.0.1", host_port: 3000}]);
+  assert.equal(observation.volumes.length, 3);
+  assert.match(observation.configuration.fingerprint, /^sha256:[a-f0-9]{64}$/);
+  assert.equal(JSON.stringify(observation).includes(secretMarker), false);
+});
+
+test("runtime collector binds a stateful schema query to the exact container identity", () => {
+  const policy = getRuntimeServicePolicies().find((entry) => entry.service_id === "dsdst-panel");
+  const containerId = "a".repeat(64);
+  let calledArgs;
+  const schema = collectSchemaObservation(policy, containerId, (args) => {
+    calledArgs = args;
+    return JSON.stringify({version: "42"});
+  });
+  assert.deepEqual(calledArgs.slice(0, 2), ["exec", containerId]);
+  assert.deepEqual(schema, {kind: "sqlite", version: "42", evidence_source: "runtime-collector"});
+});
+
+test("runtime collector rejects missing stateful schema query evidence", () => {
+  const policy = getRuntimeServicePolicies().find((entry) => entry.service_id === "dsdst-panel");
+  assert.throws(() => collectSchemaObservation(policy, "a".repeat(64), () => JSON.stringify({version: null})), /schema|evidence/i);
+});
+
+for (const [name, mutate, error] of [
+  ["volume", c => {c.Mounts[0].Destination = "/wrong";}, /volume/i],
+  ["network", c => {delete c.NetworkSettings.Networks["dsdst-edge"];}, /network/i],
+  ["port", c => {c.NetworkSettings.Ports["3000/tcp"][0].HostIp = "";}, /port/i],
+]) test(`runtime collector fails closed on an invalid ${name} observation`, () => {
+  const policy = getRuntimeServicePolicies().find((entry) => entry.service_id === "dsdst-panel");
+  const container = {
+    Config: {Env: policy.safe_keys.map((key) => `${key}=fixture`)},
+    Mounts: policy.volumes.map((volume, index) => ({Type: "volume", Source: `/runtime/source-${index}`, Destination: volume.target, RW: volume.mode === "rw"})),
+    NetworkSettings: {
+      Networks: {"dsdst-edge": {}, "dsdst-internal": {}},
+      Ports: {"3000/tcp": [{HostIp: "127.0.0.1", HostPort: "3000"}]},
+    },
+  };
+  mutate(container);
+  assert.throws(() => collectContainerObservations(policy, container, {kind: "sqlite", version: "1", evidence_source: "runtime-collector"}), error);
 });
 
 const adversarial = [

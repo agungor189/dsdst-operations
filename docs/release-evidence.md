@@ -19,9 +19,11 @@ Bu repodaki örnek manifest gerçek runtime kanıtı değildir:
    image'ın OCI revision label'ından yazılır. `commit.evidence_source` serbest
    metin değildir; collector capture kimliği, Compose service kimliği, tam
    container ID, image reference/ID/digest, OCI source repository ve revision
-   bağlarını birlikte taşır. Bu alanların tamamı ayrı read-only collector
-   provenance kaydıyla birebir eşleşmelidir. Label veya collector kaydı yoksa
-   SHA `NOT VERIFIED` kalır. Git HEAD dahil başka kaynak türleri reddedilir.
+   bağlarını birlikte taşır. Aynı collector kaydı config fingerprint, read-only
+   schema version, volume, network ve port gözlemlerini de aynı capture ve
+   container kimliğine bağlar. Bu alanların tamamı provenance kaydıyla birebir
+   eşleşmelidir. Label veya collector kaydı yoksa SHA `NOT VERIFIED` kalır. Git
+   HEAD dahil başka kaynak türleri reddedilir.
 2. Tag (`latest`, semver veya commit tagı) immutable image digest değildir.
    `runtime.image.digest` yalnız registry `RepoDigest` kanıtından doldurulur.
    Çalışan container'ın immutable image ID'si ayrıca tutulur; image ID registry
@@ -38,8 +40,9 @@ Bu repodaki örnek manifest gerçek runtime kanıtı değildir:
 5. L ve renderer aynı repository, runtime commit, image reference, image digest
    ve label state kaynağını kullanmalıdır. Renderer state'i `ro`, yalnız
    `internal` networkte ve host portu olmadan tüketir.
-6. `evidence_status: VERIFIED`, bütün `NOT VERIFIED` alanlar kapatılmadan ve
-   `runtime_access: READ-ONLY AUTHORIZED` kaydedilmeden doğrulayıcıdan geçmez.
+6. `evidence_status: VERIFIED`, bütün `NOT VERIFIED` alanlar kapatılmadan,
+   `runtime_access: READ-ONLY AUTHORIZED` kaydedilmeden ve her runtime gözlemi
+   aynı collector capture/container kaydıyla eşleşmeden doğrulayıcıdan geçmez.
 7. Bu süreç deploy, restart, image pull/build, migration veya veri yazısı
    çalıştırmaz. Runtime değiştirildiğinde eski manifest yeni release için
    yeniden kullanılmaz.
@@ -48,9 +51,11 @@ Doğrulayıcı gerçek production runtime'a erişmeden fiziksel gerçekliği tek
 başına kanıtlayamaz. Runtime collector/provenance yoksa sonuç `NOT VERIFIED`
 kalır. `VERIFIED` yalnız ayrı collector kaydı mevcutken ve container, Compose
 service, declared/observed image reference, immutable image ID, registry digest,
-OCI source/revision ile bütün servis-spesifik eşleşmeler başarılı olduğunda
-üretilir. Sentetik veya kullanıcı tarafından doldurulmuş manifest tek başına
-`VERIFIED` üretmez; sentetik pozitif testler production kanıtı değildir.
+OCI source/revision, config fingerprint, schema, mount, network ve port
+eşleşmeleri başarılı olduğunda üretilir. Capture kimliği tam gözlem setinin
+SHA-256 değerinden türetilir ve her servis kaydında tekrarlanır. Sentetik veya
+kullanıcı tarafından doldurulmuş manifest tek başına `VERIFIED` üretmez;
+sentetik pozitif testler production kanıtı değildir.
 
 ## Beklenen compose eşlemesi
 
@@ -80,9 +85,11 @@ EVIDENCE_COMPOSE_FILE=/approved/path/dsdst-operations/compose.prod.yml
 EVIDENCE_ENV_FILE=/approved/secret-store/runtime.env
 ```
 
-Servis/container/image provenance kaydını collector ile üret. Collector yalnız
-`docker compose ps`, `docker inspect` ve `docker image inspect` kullanır;
-container oluşturmaz veya başlatmaz. Çıktı manifestten ayrı tutulur:
+Tam runtime provenance kaydını collector ile üret. Collector `docker compose
+ps`, `docker inspect`, `docker image inspect` ve stateful servislerde yalnız
+read-only schema/version sorgusu için exact container ID ile `docker exec`
+kullanır; container oluşturmaz, başlatmaz, restart etmez veya veri yazmaz. Çıktı
+manifestten ayrı tutulur:
 
 ```sh
 node scripts/collect-runtime-provenance.mjs \
@@ -94,84 +101,39 @@ Collector her servis için tek ve tam container ID ister; aynı ID'nin iki
 serviste kullanımını reddeder. `com.docker.compose.service`, `.Config.Image`,
 çalışan immutable `.Image` ID'si, bu ID'nin aynı RepoTag/RepoDigest kaydı ile
 `org.opencontainers.image.source` ve `org.opencontainers.image.revision`
-label'larını birlikte kontrol eder. Farklı kaynak repolar aynı image ID veya
-digest'i paylaşamaz; L ve renderer ise farklı container ID'leriyle aynı
-source/revision/image setini taşımalıdır. Bu bağlardan biri yoksa collector
-başarısız olur ve manifest `NOT VERIFIED` kalır. Local repo `HEAD` kullanılmaz.
+label'larını birlikte kontrol eder. Aynı container inspect kaydından yalnız
+authoritative allowlist değerlerinin config fingerprint'ini, persistent mount
+mapping/source kimliklerini, networkleri ve port bindinglerini üretir. Config
+değerlerini, secret/unknown environment değerlerini ve gerçek volume source
+path/name değerlerini çıktıya koymaz.
 
-Environment değerlerini ekrana vermeden izinli config fingerprint'i üret.
-`EVIDENCE_SERVICE_ID` manifestteki servis ID'sidir. Collector allowlist'i
-manifestten değil validator policy'sinden alır; manifestin eklediği anahtarlar
-fingerprint girdisine giremez. Ara Docker çıktısına `tee` veya yönlendirme
-eklenmez. `EVIDENCE_CONTAINER_ID`, aynı servisin collector kaydındaki doğrulanmış
-container ID'sidir:
-
-```sh
-docker inspect --format '{{json .Config.Env}}' "$EVIDENCE_CONTAINER_ID" \
-  | node scripts/fingerprint-release-config.mjs "$EVIDENCE_SERVICE_ID"
-```
-
-Volume kaynak path/name değerlerini göstermeden kaynak kimliğini hashle.
-Kimlik `SHA256(JSON.stringify([Type, Source]))` şeklindedir. Aynı hosttaki L
-ve renderer aynı kimliği vermelidir. `/tmp` tmpfs persistent volume değildir
-ve aşağıdaki çıktıdan çıkarılır. Host yolu çıktı veya repoya yazılmaz:
-
-```sh
-docker inspect --format '{{json .Mounts}}' "$EVIDENCE_CONTAINER_ID" \
-  | node --input-type=module -e '
-import {createHash} from "node:crypto";
-let input="";for await(const c of process.stdin)input+=c;
-console.log(JSON.stringify(JSON.parse(input).filter(m=>m.Type!=="tmpfs").map(m=>({target:m.Destination,mode:m.RW?"rw":"ro",source_id:"sha256:"+createHash("sha256").update(JSON.stringify([m.Type,m.Source])).digest("hex")}))));'
-```
-
-Network ve port eşleşmesi secret içermez:
-
-```sh
-docker inspect --format '{{range $name, $_ := .NetworkSettings.Networks}}{{println $name}}{{end}}' "$EVIDENCE_CONTAINER_ID"
-docker inspect --format '{{json .NetworkSettings.Ports}}' "$EVIDENCE_CONTAINER_ID"
-```
-
-Docker gerçek network adları (`dsdst-edge`, `dsdst-internal`) manifestte
-compose anahtarları (`edge`, `internal`) olarak normalize edilir. Renderer için
-host binding görülürse veya `edge` ağı görülürse manifest reddedilmelidir.
+Volume kimliği `SHA256(JSON.stringify([Type, Source]))` biçimindedir. `/tmp`
+tmpfs persistent volume sayılmaz. Docker network adları (`dsdst-edge`,
+`dsdst-internal`) manifestteki Compose anahtarlarına (`edge`, `internal`)
+normalize edilir. Renderer için host binding veya `edge` ağı görülürse collector
+fail-closed durur. Farklı kaynak repolar aynı image ID/digest'i paylaşamaz; L ve
+renderer farklı container ID'leriyle aynı source/revision/image setini ve aynı
+label-state source kimliğini taşımalıdır.
 
 `volumes.declared[].source_id` yetkili operatör tarafından beklenen deployment
 mount planından aynı hash algoritmasıyla elde edilir. `observed[].source_id`
-yukarıdaki runtime komutundan gelir. Beklenen kimlik gözlenenden körlemesine
-kopyalanmaz; beklenen plan bilinmiyorsa alan `NOT VERIFIED` kalır. Alias,
-hedef, mod ve kaynak kimliği birlikte karşılaştırılır; L–renderer kaynak
-kimlikleri ayrıca eşit olmalıdır.
+yalnız collector kaydından gelir. Beklenen kimlik gözlenenden körlemesine
+kopyalanmaz; beklenen plan bilinmiyorsa alan `NOT VERIFIED` kalır. Alias, hedef,
+mod ve kaynak kimliği birlikte karşılaştırılır; L–renderer kaynak kimlikleri
+ayrıca eşit olmalıdır.
 
 Bu PR'ın port sözleşmesi Compose varsayılanlarıdır: 127.0.0.1 üzerinde
 P=3000, W=3006, K=3012, L=3013; renderer internal 3010. Farklı host portu
 veya bind adresi olan kurulumlar otomatik kabul edilmez; sözleşme ve testlerin
 ayrı review ile güncellenmesi gerekir. Observed portlar sayısal olmalıdır.
 
-Panel SQLite migration seviyesini DB'yi read-only açarak oku:
-
-```sh
-docker compose --env-file "$EVIDENCE_ENV_FILE" -f "$EVIDENCE_COMPOSE_FILE" exec -T dsdst-panel \
-  node -e 'const Database=require("better-sqlite3");const db=new Database("/data/dsdst_panel.db",{readonly:true,fileMustExist:true});console.log(JSON.stringify(db.prepare("SELECT version,name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()||null));db.close()'
-```
-
-Kit Studio migration seviyesini aynı şekilde read-only açarak oku:
-
-```sh
-docker compose --env-file "$EVIDENCE_ENV_FILE" -f "$EVIDENCE_COMPOSE_FILE" exec -T dsdst-kit-studio \
-  node -e 'const Database=require("better-sqlite3");const db=new Database("/data/dsdst-kit-studio.db",{readonly:true,fileMustExist:true});console.log(JSON.stringify(db.prepare("SELECT version,name FROM schema_migrations ORDER BY version DESC LIMIT 1").get()||null));db.close()'
-```
-
-Label state için yalnız version alanını oku; ürün, şablon veya ayar içeriğini
-çıktılama:
-
-```sh
-docker compose --env-file "$EVIDENCE_ENV_FILE" -f "$EVIDENCE_COMPOSE_FILE" exec -T label-printer \
-  node -e 'const fs=require("node:fs");const state=JSON.parse(fs.readFileSync("/app/data/app-state.json","utf8"));console.log(JSON.stringify({version:state.version??null}))'
-```
-
-W ve renderer bağımsız kalıcı şema sahibi değildir; bunlar `none` / `NOT
-APPLICABLE` kalır. Bir DB dosyası veya writable state mount görülürse beklenen
-servis eşleşmesiyle çelişir ve araştırılmadan manifest doğrulanmaz.
+Collector Panel ve Kit Studio SQLite dosyalarını `readonly: true` ve
+`fileMustExist: true` ile açıp yalnız son migration version alanını; Label
+Printer state dosyasından yalnız version alanını okur. Sorgu başarısızsa, version
+yoksa veya sonuç beklenen şekilden saparsa capture başarısız olur. Stateful
+serviste `compose.prod.yml` schema kanıtı değildir. W ve renderer bağımsız kalıcı
+şema sahibi değildir; collector bunları `none` / `NOT APPLICABLE` olarak aynı
+capture kaydına bağlar.
 
 ## Yasak toplama biçimleri
 
@@ -191,12 +153,13 @@ toplama prosedüründe kullanılmaz:
 
 1. Redaksiyonlu şablon kopyalanır; orijinal şablon korunur.
 2. Her runtime alanı yalnız karşılık gelen salt-okunur kanıtla doldurulur.
-3. Commit ve image alanları collector provenance kaydıyla birebir doldurulur.
-   Source repository, Compose service, container ID, declared/observed image
-   reference, immutable image ID/digest ve OCI revision bağlarından biri eksikse
-   ilgili runtime kanıtı yazılmaz. Şema kaynağı `read-only schema query` veya
-   stateless servisler için `compose.prod.yml` olur.
-4. Gözlenen mount/network/portlar normalize edilerek `observed` alanına yazılır.
+3. Commit, image, config, schema ve observed volume/network/port alanları aynı
+   collector provenance kaydıyla birebir doldurulur. Source repository, Compose
+   service, capture/container ID, image ID/digest, OCI revision veya runtime
+   observation bağlarından biri eksikse ilgili runtime kanıtı yazılmaz.
+4. Stateful schema kanıt kaynağı `runtime-collector` olmalıdır. Manifestte elle
+   yazılmış fingerprint/schema/topology veya declared alandan kopyalanmış
+   `observed` değer collector kaydı yerine geçmez.
 5. Herhangi bir alan eksikse `NOT VERIFIED` bırakılır ve manifest statusü
    değiştirilmez.
 6. Doğrulayıcı çalıştırılır:
@@ -217,13 +180,15 @@ node scripts/validate-release-evidence.mjs \
 ```
 
 `VERIFIED` manifest provenance argümanı olmadan reddedilir. Provenance kaydı da
-manifestteki capture zamanı ve her servis alanıyla tam eşleşmelidir.
+manifestteki capture zamanı, tam gözlem setinden türetilen capture kimliği ve her
+servisin container/image/config/schema/topology alanlarıyla tam eşleşmelidir.
 
 Doğrulayıcı eksik commit/digest/provenance alanını, yeniden kullanılan container
 kimliğini, yanlış Compose service veya source repository'yi, declared/observed
-image farkını, eksik servisleri, topology sapmasını, L–renderer provenance
-farkını, authoritative config allowlist sapmasını ve bilinmeyen içeren
-`VERIFIED` manifesti reddeder.
+image farkını, eksik runtime observation'ı, başka capture/container kanıtını,
+fabricated config/schema/topology alanlarını, L–renderer provenance farkını,
+authoritative config allowlist sapmasını ve bilinmeyen içeren `VERIFIED`
+manifesti reddeder.
 
 ## Bu PR'ın kanıt durumu
 

@@ -133,7 +133,10 @@ immutable image ID, registry digest, OCI source repository ve revision bağları
 taşır. Farklı kaynak repolar aynı runtime image identity'yi paylaşamaz; L ve
 renderer farklı container ID'leriyle aynı source/revision/image setini taşır.
 Config fingerprint allowlist'leri manifestten değil servis-spesifik validator
-policy'sinden gelir.
+policy'sinden gelir. Son gate remediation'ı config fingerprint, stateful read-only
+schema version ve gerçek volume/network/port observation'larını da aynı
+service/capture/container collector kaydına bağlar. Bu remediation bağımsız final
+review yapılmadan PR01'i kabul edilmiş veya tamamlanmış saymaz.
 
 ## Karar bekleyen iş politikaları
 

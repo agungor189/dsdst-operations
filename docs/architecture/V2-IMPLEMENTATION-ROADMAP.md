@@ -4,7 +4,7 @@ Status: sequencing contract. It authorizes no implementation by itself.
 
 ## Rules of execution
 
-- PR01 release evidence is complete at O commit `1e5e6f0993e8b6524e706e7c0e3e494ca483bbec` and is preserved.
+- PR01 release evidence remediation is prepared from O commit `1e5e6f0993e8b6524e706e7c0e3e494ca483bbec`, but remains under independent final review. It is not an accepted implementation dependency until that review records an exact accepted commit.
 - Start no item until its dependencies and owner decisions are closed.
 - One PR should close one coherent invariant with a red regression test, migration/rollback statement and exact cross-repository impact.
 - Code correctness, historical-data repair, runtime deployment and production acceptance are separate gates.
@@ -45,7 +45,7 @@ The audit backlog remains valuable, but its numbering assumed patch-by-patch rem
 
 | Audit PR | Original intent | V2 disposition | New home / reason |
 | --- | --- | --- | --- |
-| PR01 | Runtime/release evidence | **KEEP — completed** | Foundational PR01; extend only compatibly in V2-17/V2-18. |
+| PR01 | Runtime/release evidence | **KEEP — final review pending** | Foundational PR01; not an implementation dependency until its remediated exact commit is independently accepted. |
 | PR02 | K consistent snapshot and backup manifest | **REMAP** | V2-16; recovery-set design must include all state, not K alone. |
 | PR03 | Exact business invariant oracle | **KEEP, FIRST** | V2-01; prerequisite to business rewiring. |
 | PR04 | Prevent deletion outside uploads | **KEEP** | V2-02 security containment. |

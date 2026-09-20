@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import Ajv2020 from "ajv/dist/2020.js";
 import addFormats from "ajv-formats";
@@ -16,6 +17,8 @@ const NOT_APPLICABLE = "NOT APPLICABLE";
 const SHA_PATTERN = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const RUNTIME_COLLECTOR = "dsdst-read-only-runtime-collector-v1";
+const SECRET_LIKE_KEY = /(SECRET|PASSWORD|TOKEN|API_KEY|ACCESS_KEY|PRIVATE|CREDENTIAL)/i;
+const RUNTIME_NETWORK_NAMES = {edge: "dsdst-edge", internal: "dsdst-internal"};
 
 const EXPECTED_SERVICES = {
   "dsdst-panel": {
@@ -109,6 +112,7 @@ const mapping = ({source_id, ...rest}) => rest;
 export function getSafeConfigKeys(serviceId) {
   const expected = EXPECTED_SERVICES[serviceId];
   if (!expected) fail("service_id", "is not a PR01 service");
+  if (expected.safeKeys.some((key) => SECRET_LIKE_KEY.test(key))) fail("service_id", "has an unsafe authoritative configuration allowlist");
   return [...expected.safeKeys];
 }
 
@@ -116,7 +120,18 @@ export function getRuntimeServicePolicies() {
   return Object.entries(EXPECTED_SERVICES).map(([service_id, expected]) => ({
     service_id,
     source_repository: expected.repository,
+    schema_kind: expected.schemaKind,
+    safe_keys: getSafeConfigKeys(service_id),
+    networks: [...expected.networks],
+    network_names: Object.fromEntries(expected.networks.map((network) => [network, RUNTIME_NETWORK_NAMES[network]])),
+    volumes: structuredClone(expected.volumes),
+    ports: structuredClone(expected.ports),
   }));
+}
+
+export function createRuntimeCaptureId(capturedAt, services) {
+  const normalizedServices = services.map(({capture_id, ...service}) => service);
+  return "runtime-" + createHash("sha256").update(JSON.stringify({captured_at: capturedAt, services: normalizedServices})).digest("hex");
 }
 
 const validateObserved = (value, path, itemValidator) => {
@@ -192,17 +207,24 @@ const validateRuntime = (service, expected, path) => {
 
   requireExactKeys(runtime.schema, ["kind", "version", "evidence_source"], `${path}.runtime.schema`);
   if (runtime.schema.kind !== expected.schemaKind) fail(`${path}.runtime.schema.kind`, `must be ${expected.schemaKind}`);
-  requireString(runtime.schema.version, `${path}.runtime.schema.version`);
-  requireString(runtime.schema.evidence_source, `${path}.runtime.schema.evidence_source`);
-  if (![UNKNOWN, "compose.prod.yml", "read-only schema query"].includes(runtime.schema.evidence_source)) fail(`${path}.runtime.schema.evidence_source`, "unsupported schema evidence source");
-  if (runtime.schema.kind === "none" && runtime.schema.version !== NOT_APPLICABLE) fail(`${path}.runtime.schema.version`, "must be NOT APPLICABLE for a stateless service");
-  if (runtime.schema.kind !== "none" && runtime.schema.version === NOT_APPLICABLE) fail(`${path}.runtime.schema.version`, "cannot be NOT APPLICABLE for a stateful service");
+  const schemaVersion = requireString(runtime.schema.version, `${path}.runtime.schema.version`);
+  const schemaSource = requireString(runtime.schema.evidence_source, `${path}.runtime.schema.evidence_source`);
+  if (runtime.schema.kind === "none") {
+    if (schemaVersion !== NOT_APPLICABLE) fail(`${path}.runtime.schema.version`, "must be NOT APPLICABLE for a stateless service");
+    if (!["compose.prod.yml", "runtime-collector"].includes(schemaSource)) fail(`${path}.runtime.schema.evidence_source`, "stateless schema evidence must come from Compose or the runtime collector");
+  } else if (schemaVersion === UNKNOWN) {
+    if (schemaSource !== UNKNOWN) fail(`${path}.runtime.schema.evidence_source`, "unverified stateful schema must have NOT VERIFIED evidence");
+  } else {
+    if (schemaVersion === NOT_APPLICABLE) fail(`${path}.runtime.schema.version`, "cannot be NOT APPLICABLE for a stateful service");
+    if (schemaSource !== "runtime-collector") fail(`${path}.runtime.schema.evidence_source`, "stateful schema evidence must come from a runtime collector read-only query");
+  }
 
   requireExactKeys(runtime.configuration, ["status", "fingerprint", "redacted", "safe_keys"], `${path}.runtime.configuration`);
   if (!new Set([UNKNOWN, "VERIFIED"]).has(runtime.configuration.status)) fail(`${path}.runtime.configuration.status`, "must be NOT VERIFIED or VERIFIED");
   const fingerprint = requireString(runtime.configuration.fingerprint, `${path}.runtime.configuration.fingerprint`);
   if (fingerprint !== UNKNOWN && !DIGEST_PATTERN.test(fingerprint)) fail(`${path}.runtime.configuration.fingerprint`, "must be NOT VERIFIED or sha256:<64 lowercase hex>");
   if (runtime.configuration.status === "VERIFIED" && fingerprint === UNKNOWN) fail(`${path}.runtime.configuration.fingerprint`, "is required when configuration is VERIFIED");
+  if (runtime.configuration.status === UNKNOWN && fingerprint !== UNKNOWN) fail(`${path}.runtime.configuration.fingerprint`, "cannot be present when configuration is NOT VERIFIED");
   if (runtime.configuration.redacted !== true) fail(`${path}.runtime.configuration.redacted`, "must be true");
   const safeKeys = requireArray(runtime.configuration.safe_keys, `${path}.runtime.configuration.safe_keys`);
   if (new Set(safeKeys).size !== safeKeys.length) fail(`${path}.runtime.configuration.safe_keys`, "must be unique");
@@ -241,6 +263,38 @@ const validateRuntime = (service, expected, path) => {
   }
 };
 
+const validateCollectorObservation = (record, expected, path) => {
+  requireExactKeys(record.schema, ["kind", "version", "evidence_source"], `${path}.schema`);
+  if (record.schema.kind !== expected.schemaKind) fail(`${path}.schema.kind`, `must be ${expected.schemaKind}`);
+  const schemaVersion = requireString(record.schema.version, `${path}.schema.version`);
+  if (record.schema.evidence_source !== "runtime-collector") fail(`${path}.schema.evidence_source`, "must be runtime-collector");
+  if (expected.schemaKind === "none" && schemaVersion !== NOT_APPLICABLE) fail(`${path}.schema.version`, "must be NOT APPLICABLE for a stateless service");
+  if (expected.schemaKind !== "none" && [UNKNOWN, NOT_APPLICABLE].includes(schemaVersion)) fail(`${path}.schema.version`, "requires a read-only runtime schema observation");
+
+  requireExactKeys(record.configuration, ["status", "fingerprint", "redacted", "safe_keys"], `${path}.configuration`);
+  if (record.configuration.status !== "VERIFIED") fail(`${path}.configuration.status`, "must be VERIFIED by the runtime collector");
+  if (!DIGEST_PATTERN.test(record.configuration.fingerprint)) fail(`${path}.configuration.fingerprint`, "must be a runtime collector SHA-256 fingerprint");
+  if (record.configuration.redacted !== true) fail(`${path}.configuration.redacted`, "must remain true");
+  if (!sameJson(record.configuration.safe_keys, expected.safeKeys)) fail(`${path}.configuration.safe_keys`, "must exactly match the authoritative service allowlist");
+  if (record.configuration.safe_keys.some((key) => SECRET_LIKE_KEY.test(key))) fail(`${path}.configuration.safe_keys`, "contains a secret-like key");
+
+  const volumes = requireArray(record.volumes, `${path}.volumes`);
+  volumes.forEach((volume, index) => validateVolume(volume, `${path}.volumes[${index}]`));
+  if (!sameJson(volumes.map(mapping), expected.volumes)) fail(`${path}.volumes`, "does not match the service mapping contract");
+  if (volumes.some((volume) => volume.source_id === UNKNOWN)) fail(`${path}.volumes`, "requires actual runtime source identities");
+
+  const networks = requireArray(record.networks, `${path}.networks`);
+  networks.forEach((network, index) => requireString(network, `${path}.networks[${index}]`));
+  if (!sameJson(networks, expected.networks)) fail(`${path}.networks`, "does not match the runtime network contract");
+
+  const ports = requireArray(record.ports, `${path}.ports`);
+  ports.forEach((port, index) => validatePort(port, `${path}.ports[${index}]`));
+  const portContract = ports.map(({exposure, container_port, protocol}) => ({exposure, container_port, protocol}));
+  if (!sameJson(portContract, expected.ports)) fail(`${path}.ports`, "does not match the runtime port contract");
+  const binding = hostPorts[record.service_id];
+  if (binding && (ports[0].host_ip !== "127.0.0.1" || ports[0].host_port !== binding[1])) fail(`${path}.ports`, "unexpected runtime host binding");
+};
+
 const validateRuntimeProvenance = (manifest, provenance) => {
   requireExactKeys(provenance, ["provenance_version", "capture_id", "captured_at", "collector", "services"], "runtime_provenance");
   if (provenance.provenance_version !== 1) fail("runtime_provenance.provenance_version", "must be 1");
@@ -254,7 +308,8 @@ const validateRuntimeProvenance = (manifest, provenance) => {
   const containerIds = new Set();
   for (const [index, record] of records.entries()) {
     const path = `runtime_provenance.services[${index}]`;
-    requireExactKeys(record, ["service_id", "compose_service", "container_id", "declared_image_reference", "observed_image_reference", "image_id", "image_digest", "source_repository", "revision"], path);
+    requireExactKeys(record, ["capture_id", "service_id", "compose_service", "container_id", "declared_image_reference", "observed_image_reference", "image_id", "image_digest", "source_repository", "revision", "schema", "configuration", "volumes", "networks", "ports"], path);
+    if (record.capture_id !== captureId) fail(`${path}.capture_id`, "must match the collector capture identity");
     const serviceId = requireString(record.service_id, `${path}.service_id`);
     const expected = EXPECTED_SERVICES[serviceId];
     if (!expected) fail(`${path}.service_id`, "is not a PR01 service");
@@ -270,8 +325,10 @@ const validateRuntimeProvenance = (manifest, provenance) => {
     if (!DIGEST_PATTERN.test(record.image_digest)) fail(`${path}.image_digest`, "must be an immutable registry digest");
     if (record.source_repository !== expected.repository) fail(`${path}.source_repository`, "does not match the expected service repository");
     if (!SHA_PATTERN.test(record.revision)) fail(`${path}.revision`, "must be an OCI source revision SHA");
+    validateCollectorObservation(record, expected, path);
     byService.set(serviceId, record);
   }
+  if (captureId !== createRuntimeCaptureId(provenance.captured_at, records)) fail("runtime_provenance.capture_id", "does not match the complete collector observation set");
   for (const service of manifest.services) {
     const record = byService.get(service.service_id);
     if (!record) fail("runtime_provenance.services", `missing required service ${service.service_id}`);
@@ -289,6 +346,11 @@ const validateRuntimeProvenance = (manifest, provenance) => {
         runtime.image.digest !== record.image_digest || runtime.image.source_repository !== record.source_repository) {
       fail(`runtime_provenance.${service.service_id}`, "collector record does not match the manifest runtime image");
     }
+    if (!sameJson(runtime.schema, record.schema)) fail(`runtime_provenance.${service.service_id}.schema`, "collector observation does not match the manifest");
+    if (!sameJson(runtime.configuration, record.configuration)) fail(`runtime_provenance.${service.service_id}.configuration`, "collector observation does not match the manifest");
+    if (!sameJson(runtime.volumes.observed, record.volumes)) fail(`runtime_provenance.${service.service_id}.volumes`, "collector observation does not match the manifest");
+    if (!sameJson(runtime.networks.observed, record.networks)) fail(`runtime_provenance.${service.service_id}.networks`, "collector observation does not match the manifest");
+    if (!sameJson(runtime.ports.observed, record.ports)) fail(`runtime_provenance.${service.service_id}.ports`, "collector observation does not match the manifest");
   }
   for (let left = 0; left < records.length; left += 1) {
     for (let right = left + 1; right < records.length; right += 1) {

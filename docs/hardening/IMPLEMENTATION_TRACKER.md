@@ -147,14 +147,16 @@ Sonraki görev başlangıcında:
 ### PR01 — Review bekliyor
 
 - Kod: `HAZIR`
-- Test: `PASS` — manifest doğrulama, 49 test (mevcut 7 fixture korunuyor),
-  standart Ajv Draft 2020-12 doğrulaması, ShellCheck ve shell syntax
+- Test: `PASS` — manifest doğrulama, mevcut testler ve collector-bound adversarial
+  regresyonlar, standart Ajv Draft 2020-12 doğrulaması, ShellCheck ve shell syntax
 - Review: İlk bağımsız inceleme `DÜZELTME GEREKİYOR`; düzeltmeler sonrası
   tekrar bağımsız review `BEKLİYOR`. PR01 açık, kabul edilmiş değildir.
 - Canlıya alma: `YETKİ YOK`; deploy/restart/migration çalıştırılmadı
 - Runtime commit/image/schema/config/volume/network/port kanıtı: **NOT VERIFIED**
-- Final remediation: servis-spesifik read-only collector provenance zorunlu;
-  authoritative config allowlist validator ve fingerprint collector içinde sabit
+- Final remediation: servis-spesifik read-only collector provenance commit/image
+  yanında config fingerprint, stateful read-only schema version ve gerçek
+  volume/network/port observation'larını aynı capture/container kimliğine bağlar;
+  authoritative config allowlist validator ve collector içinde sabittir
 - Veri etkisi: Yok
 - Kod rollbacki: PR01 commit revert
 - Veri rollbacki: Gerekmez; veri yazısı yok
@@ -168,3 +170,10 @@ eklenmiştir. Yeni 5 regresyon önce 5 FAIL / mevcut 7 PASS ile kusurları
 kimliği, tam host port eşlemesi ve standart JSON Schema doğrulaması eklendi.
 Sonraki görev bu düzeltmenin kabul edilmiş exact commitini içermelidir;
 PR02 için henüz kabul/onay yoktur. Migration ve production veri etkisi yoktur.
+
+Son gate review, config/schema/topology observation'larının collector kaydına
+bağlı olmadan `VERIFIED` üretilebildiğini gösterdi. Remediation regression'ı önce
+49 PASS / 1 FAIL ile bu bypass'ı yeniden üretti. Collector ve validator artık bu
+alanları aynı service/capture/container kaydına fail-closed bağlar. Remediation
+tamamlansa da bağımsız final review henüz yapılmadı; PR01 `BEKLİYOR` ve sonraki
+işler için implementation dependency değildir.

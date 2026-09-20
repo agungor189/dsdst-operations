@@ -8,7 +8,7 @@ Scope: Panel (P), Warehouse (W), Kit Studio (K), Label Printer/renderer (L), Ope
 
 Decision authority: repository owner
 
-Supersedes: informal ownership assumptions; it does not erase accepted hardening or PR01
+Supersedes: informal ownership assumptions; it does not erase accepted hardening or the PR01 work under review
 
 ## 1. Outcome
 

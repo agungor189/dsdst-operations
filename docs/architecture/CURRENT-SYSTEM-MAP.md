@@ -14,7 +14,7 @@ Observed: 2026-09-20.
 | K | `agungor189/dsdst-kit-studio` | `main` | `fc90fceba94a308016ebfbfddcd78f5ae8ef20a2` | Kit design, compatibility, variants, versions/snapshots, local catalog cache and uploads. |
 | L | `agungor189/Label-Printer` | `main` | `326ac545e208aa665365abf8dde6cb9cf4ecb961` | Label editor, JSON template state and headless PDF renderer. |
 
-O includes accepted hardening work and PR01 after its review remediation. These commits are the architecture input; no repository was reset to the older audit baseline.
+O includes the preserved PR01 work and its review remediation as architecture input, but PR01 is not an accepted implementation dependency until independent final review records an exact accepted commit. No repository was reset to the older audit baseline.
 
 The independent audit used an older W main commit (`13b4d266...`) and O main commit (`c775bc1...`). ARCH-00 checked the actual heads above and treats audit findings as inputs to reproduce or close, not as current-runtime truth.
 

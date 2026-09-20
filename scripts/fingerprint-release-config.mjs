@@ -37,7 +37,10 @@ export function fingerprintEnvironment(serviceId, environment) {
     const separator = entry.indexOf("=");
     if (separator < 1) fail(`runtime environment entry ${index} is invalid`);
     const key = entry.slice(0, separator);
-    if (allowed.includes(key)) selected.set(key, entry.slice(separator + 1));
+    if (allowed.includes(key)) {
+      if (selected.has(key)) fail(`runtime environment duplicates authoritative configuration key ${key}`);
+      selected.set(key, entry.slice(separator + 1));
+    }
   }
   const pairs = allowed.map((key) => {
     if (!selected.has(key)) fail("runtime environment is missing an authoritative allowlist key");

@@ -107,8 +107,31 @@
       "properties": {
         "kind": { "enum": ["sqlite", "json-state", "none"] },
         "version": { "$ref": "#/$defs/verificationText" },
-        "evidence_source": { "$ref": "#/$defs/verificationText" }
-      }
+        "evidence_source": { "enum": ["NOT VERIFIED", "compose.prod.yml", "runtime-collector"] }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "kind": { "enum": ["sqlite", "json-state"] },
+            "version": { "const": "NOT VERIFIED" },
+            "evidence_source": { "const": "NOT VERIFIED" }
+          }
+        },
+        {
+          "properties": {
+            "kind": { "enum": ["sqlite", "json-state"] },
+            "version": { "type": "string", "minLength": 1, "not": { "enum": ["NOT VERIFIED", "NOT APPLICABLE"] } },
+            "evidence_source": { "const": "runtime-collector" }
+          }
+        },
+        {
+          "properties": {
+            "kind": { "const": "none" },
+            "version": { "const": "NOT APPLICABLE" },
+            "evidence_source": { "enum": ["compose.prod.yml", "runtime-collector"] }
+          }
+        }
+      ]
     },
     "configuration": {
       "type": "object",
@@ -126,7 +149,21 @@
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
         }
-      }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "status": { "const": "NOT VERIFIED" },
+            "fingerprint": { "const": "NOT VERIFIED" }
+          }
+        },
+        {
+          "properties": {
+            "status": { "const": "VERIFIED" },
+            "fingerprint": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+          }
+        }
+      ]
     },
     "volume": {
       "type": "object",
