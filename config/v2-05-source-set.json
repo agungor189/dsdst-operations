@@ -12,19 +12,19 @@
       "id": "P",
       "repository": "agungor189/panel-kit-yonetimi",
       "contextEnv": "PANEL_CONTEXT",
-      "revision": "6b0c57c38c17996b45bb44db5df4abb28ee713a8"
+      "revision": "82aaaf5575e88bc347b4b2d28f81aa59490ccad0"
     },
     {
       "id": "W",
       "repository": "agungor189/Dsdst-Warehouse",
       "contextEnv": "WAREHOUSE_CONTEXT",
-      "revision": "67faf6de671879fe0d02c0f07de3bab22fbebf0c"
+      "revision": "a00be0e89cd4871942b7a8eb51e90fe265e7e031"
     },
     {
       "id": "K",
       "repository": "agungor189/dsdst-kit-studio",
       "contextEnv": "KIT_STUDIO_CONTEXT",
-      "revision": "24e5abe82ce5237063f5b73ecd8d01110efeae68"
+      "revision": "2337bd4d86c47e143d3cabaf830a869932bb0968"
     },
     {
       "id": "L",
