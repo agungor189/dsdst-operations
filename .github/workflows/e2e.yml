@@ -19,7 +19,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: agungor189/dsdst-operations
-          ref: d0901cae7da3304e08e746e1ada2e6e0158235ee
+          ref: 89573e14b9f57240e2e06ccf98cfda39f4e09e21
           path: dsdst-operations
       - uses: actions/checkout@v4
         with:
