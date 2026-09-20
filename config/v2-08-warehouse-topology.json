@@ -1,0 +1,91 @@
+{
+  "id": "warehouse-v2-08-current",
+  "name": "DSDST Current Warehouse",
+  "codeTemplate": "{rack}-K{level}-P{position}-{depth}",
+  "racks": [
+    {
+      "code": "A1", "levelCount": 4, "positionCount": 6, "role": "MIXED",
+      "allowMixedSku": true, "allowMixedLot": true, "placementPriority": 100, "active": true,
+      "depths": [{ "code": "FRONT", "isFront": true, "priority": 0 }, { "code": "REAR_1", "isFront": false, "priority": 1 }, { "code": "REAR_2", "isFront": false, "priority": 2 }],
+      "levels": [{ "number": 1, "role": "MIXED", "heavyPenalty": 0 }, { "number": 2, "role": "MIXED", "heavyPenalty": 0 }, { "number": 3, "role": "MIXED", "heavyPenalty": 0 }, { "number": 4, "role": "RESERVE", "heavyPenalty": 500 }]
+    },
+    {
+      "code": "A2", "levelCount": 4, "positionCount": 6, "role": "MIXED",
+      "allowMixedSku": true, "allowMixedLot": true, "placementPriority": 100, "active": true,
+      "depths": [{ "code": "FRONT", "isFront": true, "priority": 0 }, { "code": "REAR_1", "isFront": false, "priority": 1 }, { "code": "REAR_2", "isFront": false, "priority": 2 }],
+      "levels": [{ "number": 1, "role": "MIXED", "heavyPenalty": 0 }, { "number": 2, "role": "MIXED", "heavyPenalty": 0 }, { "number": 3, "role": "MIXED", "heavyPenalty": 0 }, { "number": 4, "role": "RESERVE", "heavyPenalty": 500 }]
+    },
+    {
+      "code": "B1", "levelCount": 4, "positionCount": 6, "role": "MIXED",
+      "allowMixedSku": true, "allowMixedLot": true, "placementPriority": 100, "active": true,
+      "depths": [{ "code": "FRONT", "isFront": true, "priority": 0 }, { "code": "REAR_1", "isFront": false, "priority": 1 }, { "code": "REAR_2", "isFront": false, "priority": 2 }],
+      "levels": [{ "number": 1, "role": "MIXED", "heavyPenalty": 0 }, { "number": 2, "role": "MIXED", "heavyPenalty": 0 }, { "number": 3, "role": "MIXED", "heavyPenalty": 0 }, { "number": 4, "role": "RESERVE", "heavyPenalty": 500 }]
+    },
+    {
+      "code": "B2", "levelCount": 4, "positionCount": 6, "role": "MIXED",
+      "allowMixedSku": true, "allowMixedLot": true, "placementPriority": 100, "active": true,
+      "depths": [{ "code": "FRONT", "isFront": true, "priority": 0 }, { "code": "REAR_1", "isFront": false, "priority": 1 }, { "code": "REAR_2", "isFront": false, "priority": 2 }],
+      "levels": [{ "number": 1, "role": "MIXED", "heavyPenalty": 0 }, { "number": 2, "role": "MIXED", "heavyPenalty": 0 }, { "number": 3, "role": "MIXED", "heavyPenalty": 0 }, { "number": 4, "role": "RESERVE", "heavyPenalty": 500 }]
+    },
+    {
+      "code": "C1", "levelCount": 4, "positionCount": 6, "role": "MIXED",
+      "allowMixedSku": true, "allowMixedLot": true, "placementPriority": 100, "active": true,
+      "depths": [{ "code": "FRONT", "isFront": true, "priority": 0 }, { "code": "REAR_1", "isFront": false, "priority": 1 }, { "code": "REAR_2", "isFront": false, "priority": 2 }],
+      "levels": [{ "number": 1, "role": "MIXED", "heavyPenalty": 0 }, { "number": 2, "role": "MIXED", "heavyPenalty": 0 }, { "number": 3, "role": "MIXED", "heavyPenalty": 0 }, { "number": 4, "role": "RESERVE", "heavyPenalty": 500 }]
+    },
+    {
+      "code": "C2", "levelCount": 4, "positionCount": 6, "role": "MIXED",
+      "allowMixedSku": true, "allowMixedLot": true, "placementPriority": 900, "lastResort": true, "active": true,
+      "depths": [{ "code": "FRONT", "isFront": true, "priority": 0 }, { "code": "REAR_1", "isFront": false, "priority": 1 }, { "code": "REAR_2", "isFront": false, "priority": 2 }],
+      "levels": [{ "number": 1, "role": "MIXED", "heavyPenalty": 0 }, { "number": 2, "role": "MIXED", "heavyPenalty": 0 }, { "number": 3, "role": "MIXED", "heavyPenalty": 0 }, { "number": 4, "role": "RESERVE", "heavyPenalty": 500 }]
+    },
+    {
+      "code": "D3", "levelCount": 4, "positionCount": 6, "role": "MIXED",
+      "allowMixedSku": true, "allowMixedLot": true, "placementPriority": 100, "active": true,
+      "depths": [{ "code": "FRONT", "isFront": true, "priority": 0 }, { "code": "REAR_1", "isFront": false, "priority": 1 }, { "code": "REAR_2", "isFront": false, "priority": 2 }],
+      "levels": [{ "number": 1, "role": "MIXED", "heavyPenalty": 0 }, { "number": 2, "role": "MIXED", "heavyPenalty": 0 }, { "number": 3, "role": "MIXED", "heavyPenalty": 0 }, { "number": 4, "role": "RESERVE", "heavyPenalty": 500 }]
+    },
+    {
+      "code": "D4", "levelCount": 4, "positionCount": 6, "role": "MIXED",
+      "allowMixedSku": true, "allowMixedLot": true, "placementPriority": 100, "active": true,
+      "depths": [{ "code": "FRONT", "isFront": true, "priority": 0 }, { "code": "REAR_1", "isFront": false, "priority": 1 }, { "code": "REAR_2", "isFront": false, "priority": 2 }],
+      "levels": [{ "number": 1, "role": "MIXED", "heavyPenalty": 0 }, { "number": 2, "role": "MIXED", "heavyPenalty": 0 }, { "number": 3, "role": "MIXED", "heavyPenalty": 0 }, { "number": 4, "role": "RESERVE", "heavyPenalty": 500 }]
+    },
+    {
+      "code": "E1", "levelCount": 4, "positionCount": 6, "role": "MIXED",
+      "allowMixedSku": true, "allowMixedLot": true, "placementPriority": 100, "active": true,
+      "depths": [{ "code": "FRONT", "isFront": true, "priority": 0 }, { "code": "REAR_1", "isFront": false, "priority": 1 }, { "code": "REAR_2", "isFront": false, "priority": 2 }],
+      "levels": [{ "number": 1, "role": "MIXED", "heavyPenalty": 0 }, { "number": 2, "role": "MIXED", "heavyPenalty": 0 }, { "number": 3, "role": "MIXED", "heavyPenalty": 0 }, { "number": 4, "role": "RESERVE", "heavyPenalty": 500 }]
+    },
+    {
+      "code": "E2", "levelCount": 4, "positionCount": 6, "role": "MIXED",
+      "allowMixedSku": true, "allowMixedLot": true, "placementPriority": 100, "active": true,
+      "depths": [{ "code": "FRONT", "isFront": true, "priority": 0 }, { "code": "REAR_1", "isFront": false, "priority": 1 }, { "code": "REAR_2", "isFront": false, "priority": 2 }],
+      "levels": [{ "number": 1, "role": "MIXED", "heavyPenalty": 0 }, { "number": 2, "role": "MIXED", "heavyPenalty": 0 }, { "number": 3, "role": "MIXED", "heavyPenalty": 0 }, { "number": 4, "role": "RESERVE", "heavyPenalty": 500 }]
+    },
+    {
+      "code": "F1", "levelCount": 4, "positionCount": 6, "role": "MIXED",
+      "allowMixedSku": true, "allowMixedLot": true, "placementPriority": 100, "active": true,
+      "depths": [{ "code": "FRONT", "isFront": true, "priority": 0 }, { "code": "REAR_1", "isFront": false, "priority": 1 }, { "code": "REAR_2", "isFront": false, "priority": 2 }],
+      "levels": [{ "number": 1, "role": "MIXED", "heavyPenalty": 0 }, { "number": 2, "role": "MIXED", "heavyPenalty": 0 }, { "number": 3, "role": "MIXED", "heavyPenalty": 0 }, { "number": 4, "role": "RESERVE", "heavyPenalty": 500 }]
+    },
+    {
+      "code": "F2", "levelCount": 4, "positionCount": 6, "role": "MIXED",
+      "allowMixedSku": true, "allowMixedLot": true, "placementPriority": 100, "active": true,
+      "depths": [{ "code": "FRONT", "isFront": true, "priority": 0 }, { "code": "REAR_1", "isFront": false, "priority": 1 }, { "code": "REAR_2", "isFront": false, "priority": 2 }],
+      "levels": [{ "number": 1, "role": "MIXED", "heavyPenalty": 0 }, { "number": 2, "role": "MIXED", "heavyPenalty": 0 }, { "number": 3, "role": "MIXED", "heavyPenalty": 0 }, { "number": 4, "role": "RESERVE", "heavyPenalty": 500 }]
+    },
+    {
+      "code": "G1", "levelCount": 4, "positionCount": 6, "role": "MIXED",
+      "allowMixedSku": true, "allowMixedLot": true, "placementPriority": 100, "active": true,
+      "depths": [{ "code": "FRONT", "isFront": true, "priority": 0 }, { "code": "REAR_1", "isFront": false, "priority": 1 }, { "code": "REAR_2", "isFront": false, "priority": 2 }],
+      "levels": [{ "number": 1, "role": "MIXED", "heavyPenalty": 0 }, { "number": 2, "role": "MIXED", "heavyPenalty": 0 }, { "number": 3, "role": "MIXED", "heavyPenalty": 0 }, { "number": 4, "role": "RESERVE", "heavyPenalty": 500 }]
+    },
+    {
+      "code": "G2", "levelCount": 4, "positionCount": 6, "role": "MIXED",
+      "allowMixedSku": true, "allowMixedLot": true, "placementPriority": 100, "active": true,
+      "depths": [{ "code": "FRONT", "isFront": true, "priority": 0 }, { "code": "REAR_1", "isFront": false, "priority": 1 }, { "code": "REAR_2", "isFront": false, "priority": 2 }],
+      "levels": [{ "number": 1, "role": "MIXED", "heavyPenalty": 0 }, { "number": 2, "role": "MIXED", "heavyPenalty": 0 }, { "number": 3, "role": "MIXED", "heavyPenalty": 0 }, { "number": 4, "role": "RESERVE", "heavyPenalty": 500 }]
+    }
+  ]
+}
