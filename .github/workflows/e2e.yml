@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: agungor189/panel-kit-yonetimi
-          ref: 5e3dc7ed36ba1be3894db61d514b38f565ffee98
+          ref: c4e33c53a7c0c28d04062ab6b118c7d9bce266ac
           path: panel-kit-yonetimi
       - uses: actions/checkout@v4
         with:
