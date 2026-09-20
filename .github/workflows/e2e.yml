@@ -24,17 +24,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: agungor189/panel-kit-yonetimi
-          ref: f4d5a33cab0165d1b2425e71d56de41a65f2b72c
+          ref: 6b0c57c38c17996b45bb44db5df4abb28ee713a8
           path: panel-kit-yonetimi
       - uses: actions/checkout@v4
         with:
           repository: agungor189/Dsdst-Warehouse
-          ref: 4b9c47898400949712a848f6fb564a5ee39711cd
+          ref: 67faf6de671879fe0d02c0f07de3bab22fbebf0c
           path: Dsdst-Warehouse
       - uses: actions/checkout@v4
         with:
           repository: agungor189/dsdst-kit-studio
-          ref: 22b50cb3794277a503ad49b9c2e7b90770f3c5b7
+          ref: 24e5abe82ce5237063f5b73ecd8d01110efeae68
           path: dsdst-kit-studio
       - uses: actions/checkout@v4
         with:

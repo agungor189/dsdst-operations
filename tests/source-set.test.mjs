@@ -38,9 +38,9 @@ test("V2-05 source set declares exact immutable O/P/W/K/L revisions", () => {
   assert.match(byId.get("HUB").revision, /^[a-f0-9]{40}$/);
   assert.deepEqual(Object.fromEntries(["O", "P", "W", "K", "L"].map((id) => [id, byId.get(id).revision])), {
     O: "d0bafb42024c2b1d418029d59d520b20479acc5c",
-    P: "f4d5a33cab0165d1b2425e71d56de41a65f2b72c",
-    W: "4b9c47898400949712a848f6fb564a5ee39711cd",
-    K: "22b50cb3794277a503ad49b9c2e7b90770f3c5b7",
+    P: "6b0c57c38c17996b45bb44db5df4abb28ee713a8",
+    W: "67faf6de671879fe0d02c0f07de3bab22fbebf0c",
+    K: "24e5abe82ce5237063f5b73ecd8d01110efeae68",
     L: "c57d9df0f412dae2c022093f0d7ac8591754edec",
   });
 });
