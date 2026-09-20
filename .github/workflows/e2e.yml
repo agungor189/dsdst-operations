@@ -19,22 +19,22 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: agungor189/dsdst-operations
-          ref: aa671fa791f2001d8352f579d9e803573721c176
+          ref: e658c8f1f3f02a8d0fd23cf6442fdb4d7fe4f395
           path: dsdst-operations
       - uses: actions/checkout@v4
         with:
           repository: agungor189/panel-kit-yonetimi
-          ref: 32c38b5df936796022a39b596676a0c043f6452a
+          ref: f4d5a33cab0165d1b2425e71d56de41a65f2b72c
           path: panel-kit-yonetimi
       - uses: actions/checkout@v4
         with:
           repository: agungor189/Dsdst-Warehouse
-          ref: be244aa17e08650f6554d3287042fb37ad705b77
+          ref: 4b9c47898400949712a848f6fb564a5ee39711cd
           path: Dsdst-Warehouse
       - uses: actions/checkout@v4
         with:
           repository: agungor189/dsdst-kit-studio
-          ref: 2a8f4f5d4625eea6041c2b2a146bca288e21cf34
+          ref: 22b50cb3794277a503ad49b9c2e7b90770f3c5b7
           path: dsdst-kit-studio
       - uses: actions/checkout@v4
         with:
@@ -59,5 +59,5 @@ jobs:
       - name: Run isolated system workflow
         working-directory: dsdst-operations
         env:
-          SOURCE_SET_MANIFEST: ../source-set-control/config/v2-04-source-set.json
+          SOURCE_SET_MANIFEST: ../source-set-control/config/v2-05-source-set.json
         run: ./scripts/e2e.sh

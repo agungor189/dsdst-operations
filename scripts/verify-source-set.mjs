@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const manifestPath = path.resolve(process.env.SOURCE_SET_MANIFEST || path.join(root, "config", "v2-04-source-set.json"));
+const manifestPath = path.resolve(process.env.SOURCE_SET_MANIFEST || path.join(root, "config", "v2-05-source-set.json"));
 const allowDirty = process.argv.includes("--allow-dirty");
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 const shaPattern = /^[a-f0-9]{40}$/;
@@ -26,7 +26,7 @@ const normalizeRemote = (value) => value
   .toLowerCase();
 
 if (manifest.schemaVersion !== "dsdst.test-source-set.v1") throw new Error("Unsupported source-set schema");
-if (manifest.release !== "V2-04") throw new Error("Unsupported source-set release: expected V2-04");
+if (manifest.release !== "V2-05") throw new Error("Unsupported source-set release: expected V2-05");
 if (!Array.isArray(manifest.repositories) || manifest.repositories.length === 0) throw new Error("Source set is empty");
 const ids = new Set();
 const verified = [];
