@@ -1,0 +1,6 @@
+{
+  "schemaVersion": "dsdst.warehouse-execution-settings.v1",
+  "watchThresholdPct": 20,
+  "prepareThresholdPct": 10,
+  "heavyPackageThresholdGrams": 20000
+}

@@ -9,6 +9,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const panelRoot = path.resolve(process.env.PANEL_CONTEXT || path.join(root, "..", "ChatGPT", "panel-kit-yonetimi"));
 const warehouseRoot = path.resolve(process.env.WAREHOUSE_CONTEXT || path.join(root, "..", "Dsdst-Warehouse"));
 const topology = JSON.parse(fs.readFileSync(path.join(root, "config", "v2-08-warehouse-topology.json"), "utf8"));
+const settings = JSON.parse(fs.readFileSync(path.join(root, "config", "v2-08-warehouse-settings.json"), "utf8"));
 
 test("V2-08 current topology is configuration-owned and expands to 14x4x6x3", () => {
   assert.equal(topology.racks.length, 14);
@@ -24,7 +25,15 @@ test("V2-08 current topology is configuration-owned and expands to 14x4x6x3", ()
   assert.equal(c2.placementPriority, 900);
 });
 
-test("Panel accepts both the current topology and a future custom rack without code changes", () => {
+test("V2-08 replenishment thresholds are explicit persisted configuration", () => {
+  assert.equal(settings.schemaVersion, "dsdst.warehouse-execution-settings.v1");
+  assert.equal(settings.watchThresholdPct, 20);
+  assert.equal(settings.prepareThresholdPct, 10);
+  assert.equal(settings.prepareThresholdPct <= settings.watchThresholdPct, true);
+  assert.equal(settings.heavyPackageThresholdGrams, 20_000);
+});
+
+test("Panel accepts both the current topology and a future custom six-position rack without code changes", () => {
   const script = `
     import assert from "node:assert/strict";
     import Database from "better-sqlite3";
@@ -35,8 +44,8 @@ test("Panel accepts both the current topology and a future custom rack without c
     initializeDatabase(db);
     const service = new WarehouseExecutionService(db);
     assert.equal(service.configureTopology(${JSON.stringify(topology)}).summary.slotCount, 1008);
-    const custom = { id: "future-1x10", name: "Future rack", codeTemplate: "{rack}-{level}-{position}-{depth}", racks: [{ code: "FUTURE", levelCount: 1, positionCount: 10, role: "PICKING", allowMixedSku: false, allowMixedLot: false, placementPriority: 10, depths: [{ code: "FRONT", isFront: true, priority: 0 }] }] };
-    assert.equal(service.configureTopology(custom).summary.slotCount, 10);
+    const custom = { id: "future-2x6", name: "Future rack", codeTemplate: "{rack}-{level}-{position}-{depth}", racks: [{ code: "FUTURE", levelCount: 2, positionCount: 6, role: "PICKING", allowMixedSku: false, allowMixedLot: false, placementPriority: 10, depths: [{ code: "FRONT", isFront: true, priority: 0 }] }] };
+    assert.equal(service.configureTopology(custom).summary.slotCount, 12);
     db.close();
   `;
   const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", script], { cwd: panelRoot, encoding: "utf8" });
@@ -52,6 +61,7 @@ test("Panel is the only warehouse authority and Warehouse remains an execution B
   const warehousePages = fs.readFileSync(path.join(warehouseRoot, "src", "pages", "WarehouseAdminPages.tsx"), "utf8");
 
   assert.match(migration, /version:\s*71[\s\S]*add_authoritative_warehouse_execution_contract/);
+  assert.match(migration, /version:\s*72[\s\S]*persist_warehouse_execution_thresholds/);
   assert.match(panelRoutes, /CommandExecutor/);
   assert.match(panelRoutes, /warehouse\.goods-receipt\.accept\.v1/);
   assert.match(panelRoutes, /warehouse\.package\.move\.v1/);
