@@ -5,13 +5,13 @@
       "id": "O",
       "repository": "agungor189/dsdst-operations",
       "contextEnv": "OPERATIONS_CONTEXT",
-      "revision": "SELF"
+      "revision": "d0901cae7da3304e08e746e1ada2e6e0158235ee"
     },
     {
       "id": "P",
       "repository": "agungor189/panel-kit-yonetimi",
       "contextEnv": "PANEL_CONTEXT",
-      "revision": "c4e33c53a7c0c28d04062ab6b118c7d9bce266ac"
+      "revision": "70d8dd70f4b31c3180023611d87bb330fc12f6cc"
     },
     {
       "id": "W",
@@ -23,13 +23,13 @@
       "id": "K",
       "repository": "agungor189/dsdst-kit-studio",
       "contextEnv": "KIT_STUDIO_CONTEXT",
-      "revision": "62a22ba67f94c00e35a49e7a566444684aacbdf3"
+      "revision": "4b1a4aad74c285c11975579666bf771c66e22499"
     },
     {
       "id": "L",
       "repository": "agungor189/Label-Printer",
       "contextEnv": "LABEL_PRINTER_CONTEXT",
-      "revision": "e846c73844d0fa334535a9d104a6f2242408ee0c"
+      "revision": "12219ae925690238c7f6f1bb073d7c9ccd97a88f"
     },
     {
       "id": "HUB",

@@ -11,13 +11,20 @@ jobs:
   operations-e2e:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout source-set control
+        uses: actions/checkout@v4
         with:
+          path: source-set-control
+      - name: Checkout exact Operations source
+        uses: actions/checkout@v4
+        with:
+          repository: agungor189/dsdst-operations
+          ref: d0901cae7da3304e08e746e1ada2e6e0158235ee
           path: dsdst-operations
       - uses: actions/checkout@v4
         with:
           repository: agungor189/panel-kit-yonetimi
-          ref: c4e33c53a7c0c28d04062ab6b118c7d9bce266ac
+          ref: 70d8dd70f4b31c3180023611d87bb330fc12f6cc
           path: panel-kit-yonetimi
       - uses: actions/checkout@v4
         with:
@@ -27,18 +34,30 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: agungor189/dsdst-kit-studio
-          ref: 62a22ba67f94c00e35a49e7a566444684aacbdf3
+          ref: 4b1a4aad74c285c11975579666bf771c66e22499
           path: dsdst-kit-studio
       - uses: actions/checkout@v4
         with:
           repository: agungor189/Label-Printer
-          ref: e846c73844d0fa334535a9d104a6f2242408ee0c
+          ref: 12219ae925690238c7f6f1bb073d7c9ccd97a88f
           path: Label-Printer
       - uses: actions/checkout@v4
         with:
           repository: agungor189/dsdst-customer-hub
           ref: f030c29b6ee41765289993fda1e94d1e484b5cac
           path: dsdst-customer-hub
+      - name: Verify exact source set
+        working-directory: source-set-control
+        env:
+          OPERATIONS_CONTEXT: ../dsdst-operations
+          PANEL_CONTEXT: ../panel-kit-yonetimi
+          WAREHOUSE_CONTEXT: ../Dsdst-Warehouse
+          KIT_STUDIO_CONTEXT: ../dsdst-kit-studio
+          LABEL_PRINTER_CONTEXT: ../Label-Printer
+          CUSTOMER_HUB_CONTEXT: ../dsdst-customer-hub
+        run: node scripts/verify-source-set.mjs
       - name: Run isolated system workflow
         working-directory: dsdst-operations
+        env:
+          SOURCE_SET_MANIFEST: ../source-set-control/config/v2-01-source-set.json
         run: ./scripts/e2e.sh

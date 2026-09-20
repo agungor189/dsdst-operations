@@ -32,14 +32,12 @@ const verified = [];
 for (const entry of manifest.repositories) {
   if (ids.has(entry.id)) throw new Error(`Duplicate source-set id: ${entry.id}`);
   ids.add(entry.id);
-  if (entry.revision !== "SELF" && !shaPattern.test(entry.revision)) throw new Error(`Invalid exact revision for ${entry.id}`);
-  if (entry.revision === "SELF" && entry.id !== "O") throw new Error("SELF revision is reserved for Operations");
+  if (!shaPattern.test(entry.revision)) throw new Error(`Invalid exact revision for ${entry.id}`);
   const repositoryPath = path.resolve(process.env[entry.contextEnv] || defaults[entry.contextEnv] || "");
   if (!fs.existsSync(path.join(repositoryPath, ".git"))) throw new Error(`Missing git repository for ${entry.id}: ${repositoryPath}`);
   const observedRevision = git(repositoryPath, "rev-parse", "HEAD");
-  const expectedRevision = entry.revision === "SELF" ? observedRevision : entry.revision;
-  if (observedRevision !== expectedRevision) {
-    throw new Error(`${entry.id} revision mismatch: expected ${expectedRevision}, observed ${observedRevision}`);
+  if (observedRevision !== entry.revision) {
+    throw new Error(`${entry.id} revision mismatch: expected ${entry.revision}, observed ${observedRevision}`);
   }
   const remote = normalizeRemote(git(repositoryPath, "remote", "get-url", "origin"));
   if (remote !== entry.repository.toLowerCase()) {
