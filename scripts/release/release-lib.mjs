@@ -107,6 +107,12 @@ export function createEvidenceDigest(value) {
   return hash(value);
 }
 
+export function createRouteOperationId(value) {
+  const body = structuredClone(object(value, "route operation identity"));
+  delete body.operation_id;
+  return `routeop-${hash(body).slice("sha256:".length)}`;
+}
+
 function verifyBoundEvidence(value, label) {
   const evidence = object(value, label);
   const {evidence_digest: evidenceDigest, ...body} = evidence;
@@ -126,6 +132,34 @@ function validateChecks(value, label) {
   if (checks.smoke.status !== "PASS" || checks.smoke.mode !== "READ_ONLY") fail("read-only smoke must pass before cutover");
   exactKeys(checks.connectivity, ["status", "checks"], `${label}.connectivity`);
   if (checks.connectivity.status !== "PASS" || array(checks.connectivity.checks, `${label}.connectivity.checks`).length === 0) fail("critical cross-service connectivity checks must pass");
+}
+
+function validateRollbackSafety(value, cutoverWatermark) {
+  const safety = object(value, "rollback data safety evidence");
+  exactKeys(safety, ["mode", "status", "cutover_write_watermark", "candidate_write_watermark", "synchronization_id", "target_write_watermark", "preserves_candidate_writes"], "rollback data safety evidence");
+  if (safety.status !== "VERIFIED" || safety.cutover_write_watermark !== cutoverWatermark) fail("rollback data safety proof is not bound to cutover");
+  if (safety.mode === "ZERO_CANONICAL_WRITES") {
+    if (safety.candidate_write_watermark !== safety.cutover_write_watermark || safety.synchronization_id !== null || safety.preserves_candidate_writes !== true) fail("zero-write rollback proof does not prove zero canonical candidate writes");
+  } else if (safety.mode === "CURRENT_STATE_SYNC") {
+    if (!safety.synchronization_id || safety.target_write_watermark !== safety.candidate_write_watermark || safety.preserves_candidate_writes !== true) fail("current-state rollback synchronization does not preserve all candidate-era writes");
+  } else fail("rollback is blocked without zero-write or verified current-state synchronization proof");
+  return safety;
+}
+
+function validateRouteObservation(value, intent, expectedTarget) {
+  const observation = verifyBoundEvidence(value, "Cloudflare route observation");
+  exactKeys(observation, ["operation_id", "provenance_state", "current_target", "observed_at", "operation_state", "operation_applied_at", "evidence_digest"], "Cloudflare route observation");
+  if (observation.operation_id !== intent.operation_id || observation.provenance_state !== "VERIFIED" || !["NOT_APPLIED", "PENDING", "APPLIED", "FAILED"].includes(observation.operation_state) || observation.current_target !== expectedTarget || (observation.operation_state === "APPLIED") !== (observation.operation_applied_at !== null)) fail("Cloudflare route observation does not prove the operation target and terminal operation state");
+  const observedAt = iso(observation.observed_at, "Cloudflare route observation time");
+  if (observation.operation_applied_at !== null && iso(observation.operation_applied_at, "Cloudflare route operation applied_at") > observedAt) fail("route operation cannot be applied after its observation");
+  return observation;
+}
+
+function validateAuthority(value, intent, oldAuthoritative, candidateAuthoritative) {
+  const authority = verifyBoundEvidence(value, "runtime authority evidence");
+  exactKeys(authority, ["operation_id", "old_runtime_identity", "candidate_runtime_identity", "old_authoritative", "candidate_authoritative", "evidence_digest"], "runtime authority evidence");
+  if (authority.operation_id !== intent.operation_id || authority.old_runtime_identity !== intent.old_runtime_identity || authority.candidate_runtime_identity !== intent.new_runtime_identity || authority.old_authoritative !== oldAuthoritative || authority.candidate_authoritative !== candidateAuthoritative || authority.old_authoritative === authority.candidate_authoritative) fail("runtime authority evidence must prove exactly one authoritative writer");
+  return authority;
 }
 
 function revisionMap(sourceSet, label) {
@@ -321,10 +355,10 @@ function validateTransition(context) {
     APPROVED: ["PREFLIGHT_PASS", "FAIL"],
     PREFLIGHT_PASSED: ["CANDIDATE_UP", "FAIL"],
     CANDIDATE_UP: ["VERIFY", "FAIL"],
-    VERIFIED: ["FREEZE", "FINAL_CONVERGENCE", "CUTOVER", "FAIL"],
-    CUTOVER: ["COMPLETE", "ROLLBACK", "FAIL"],
-    FAILED: ["ROLLBACK"],
-    COMPLETED: ["ROLLBACK"],
+    VERIFIED: ["FREEZE", "FINAL_CONVERGENCE", "ROUTE_INTENT", "CUTOVER", "CUTOVER_ABORTED", "ROUTE_UNCERTAIN", "FAIL"],
+    CUTOVER: ["COMPLETE", "ROUTE_INTENT", "ROLLBACK", "ROLLBACK_ABORTED", "ROUTE_UNCERTAIN", "FAIL"],
+    FAILED: ["ROUTE_INTENT", "ROLLBACK", "ROLLBACK_ABORTED", "ROUTE_UNCERTAIN"],
+    COMPLETED: ["ROUTE_INTENT", "ROLLBACK", "ROLLBACK_ABORTED", "ROUTE_UNCERTAIN"],
     ROLLED_BACK: [],
   };
   if (!legal[state]?.includes(event.type)) {
@@ -333,8 +367,9 @@ function validateTransition(context) {
   }
   const expectedStates = {
     APPROVE: "APPROVED", PREFLIGHT_PASS: "PREFLIGHT_PASSED", CANDIDATE_UP: "CANDIDATE_UP",
-    VERIFY: "VERIFIED", FREEZE: "VERIFIED", FINAL_CONVERGENCE: "VERIFIED", CUTOVER: "CUTOVER",
-    COMPLETE: "COMPLETED", FAIL: "FAILED", ROLLBACK: "ROLLED_BACK",
+    VERIFY: "VERIFIED", FREEZE: "VERIFIED", FINAL_CONVERGENCE: "VERIFIED", ROUTE_INTENT: state,
+    CUTOVER: "CUTOVER", CUTOVER_ABORTED: "FAILED", COMPLETE: "COMPLETED", FAIL: "FAILED",
+    ROLLBACK: "ROLLED_BACK", ROLLBACK_ABORTED: state, ROUTE_UNCERTAIN: "FAILED",
   };
   if (event.state !== expectedStates[event.type]) fail(`${event.type} must produce state ${expectedStates[event.type]}`);
 
@@ -506,13 +541,41 @@ function validateTransition(context) {
     validateChecks(candidate.checks, "final candidate checks");
     if (iso(event.occurred_at, "final convergence event time") < iso(provenance.captured_at, "final provenance time")) fail("final convergence cannot be recorded before final provenance collection");
     if (context.events.some((item) => item.type === "FINAL_CONVERGENCE")) fail("final convergence can be recorded only once");
+  } else if (event.type === "ROUTE_INTENT") {
+    exactKeys(p, ["release_id", "operation_id", "action", "expected_target", "desired_target", "old_runtime_identity", "new_runtime_identity", "freeze_token", "final_snapshot_id", "started_at", "deadline_at", "candidate_write_watermark", "rollback_safety"], "route mutation intent");
+    if (p.release_id !== plan.release_id || !/^routeop-[a-f0-9]{64}$/.test(string(p.operation_id, "route operation id")) || p.operation_id !== createRouteOperationId(p)) fail("route operation id must stably bind the complete durable intent");
+    const freeze = context.events.find((item) => item.type === "FREEZE")?.payload.adapter_evidence;
+    const convergence = context.events.find((item) => item.type === "FINAL_CONVERGENCE")?.payload;
+    const cutover = context.events.find((item) => item.type === "CUTOVER");
+    if (!freeze || !convergence || p.old_runtime_identity !== plan.old_runtime.runtime_identity || p.new_runtime_identity !== convergence.final_candidate.runtime_identity || p.freeze_token !== freeze.freeze_token || p.final_snapshot_id !== convergence.final_snapshot.snapshot_id) fail("route intent runtime/freeze/final-snapshot references are not exact");
+    const startedAt = iso(p.started_at, "route intent started_at");
+    const deadlineAt = iso(p.deadline_at, "route intent deadline_at");
+    if (deadlineAt <= startedAt || deadlineAt - startedAt > 600_000 || iso(event.occurred_at, "route intent recorded_at") > deadlineAt) fail("route intent deadline must be durable before mutation and within ten minutes");
+    const priorIntent = [...context.events].reverse().find((item) => item.type === "ROUTE_INTENT");
+    if (priorIntent) {
+      const closed = context.events.some((item) => ["CUTOVER", "ROLLBACK", "CUTOVER_ABORTED", "ROLLBACK_ABORTED", "ROUTE_UNCERTAIN"].includes(item.type) && item.payload.operation_id === priorIntent.payload.operation_id);
+      if (!closed) fail("an unresolved route intent must be reconciled; a second mutation intent is forbidden");
+      if (priorIntent.payload.action === p.action) fail("route operation identity is single-use after a terminal outcome");
+    }
+    if (p.action === "CUTOVER") {
+      if (state !== "VERIFIED" || cutover || p.expected_target !== plan.old_runtime.route_target || p.desired_target !== plan.candidate.route_target || p.candidate_write_watermark !== convergence.final_snapshot.source_data_watermark || p.rollback_safety !== null) fail("cutover intent does not bind the verified old-to-candidate transition");
+    } else if (p.action === "ROLLBACK") {
+      if (!cutover || !["CUTOVER", "COMPLETED", "FAILED"].includes(state) || p.expected_target !== plan.candidate.route_target || p.desired_target !== plan.old_runtime.route_target) fail("rollback intent does not bind the candidate-to-old transition");
+      validateRollbackSafety(p.rollback_safety, cutover.payload.candidate_write_watermark);
+      if (p.candidate_write_watermark !== p.rollback_safety.candidate_write_watermark) fail("rollback intent candidate watermark mismatch");
+    } else fail("route intent action must be CUTOVER or ROLLBACK");
   } else if (event.type === "CUTOVER") {
-    exactKeys(p, ["explicit", "approval_id", "route_provenance_state", "old_runtime_identity", "new_runtime_identity", "old_target", "new_target", "started_at", "completed_at", "old_stack_mode", "freeze_token", "final_snapshot_id", "candidate_write_watermark"], "cutover evidence");
+    exactKeys(p, ["operation_id", "explicit", "approval_id", "route_provenance_state", "route_observation", "authority_evidence", "old_runtime_identity", "new_runtime_identity", "old_target", "new_target", "started_at", "completed_at", "old_stack_mode", "freeze_token", "final_snapshot_id", "candidate_write_watermark"], "cutover evidence");
     if (p.explicit !== true || p.approval_id !== approval?.approval_id) fail("cutover requires the exact explicit manual approval");
     if (p.route_provenance_state !== "VERIFIED") fail("Cloudflare route provenance must be verified before cutover");
     if (p.old_runtime_identity !== plan.old_runtime.runtime_identity) fail("cutover old runtime identity mismatch");
     const freeze = context.events?.find?.((item) => item.type === "FREEZE")?.payload.adapter_evidence;
     const convergence = context.events?.find?.((item) => item.type === "FINAL_CONVERGENCE")?.payload;
+    const intent = [...context.events].reverse().find((item) => item.type === "ROUTE_INTENT" && item.payload.action === "CUTOVER")?.payload;
+    if (!intent || p.operation_id !== intent.operation_id) fail("cutover requires its exact durable route intent");
+    const observation = validateRouteObservation(p.route_observation, intent, intent.desired_target);
+    if (observation.operation_applied_at === null || iso(observation.operation_applied_at, "cutover applied_at") > iso(intent.deadline_at, "cutover deadline")) fail("cutover success requires adapter-recorded application within the durable deadline");
+    validateAuthority(p.authority_evidence, intent, false, true);
     if (!freeze || !convergence) fail("cutover is blocked until authoritative freeze and final convergence complete");
     if (p.new_runtime_identity !== convergence.final_candidate.runtime_identity) fail("cutover new runtime identity mismatch");
     if (p.old_target !== plan.old_runtime.route_target || p.new_target !== plan.candidate.route_target) fail("cutover route targets differ from the approved plan");
@@ -520,8 +583,35 @@ function validateTransition(context) {
     if (p.freeze_token !== freeze.freeze_token || p.started_at !== freeze.freeze_started_at) fail("cutover duration must begin at the authoritative runtime write freeze");
     if (p.final_snapshot_id !== convergence.final_snapshot.snapshot_id) fail("cutover must bind the final frozen-current snapshot");
     if (p.candidate_write_watermark !== convergence.final_snapshot.source_data_watermark) fail("candidate cutover watermark must equal the final frozen-current source watermark");
+    if (p.completed_at !== observation.operation_applied_at || p.started_at !== intent.started_at) fail("cutover timestamps must come from the durable intent and adapter-recorded route application");
     const duration = iso(p.completed_at, "cutover.completed_at") - iso(p.started_at, "cutover.started_at");
     if (duration < 0 || duration > 600_000) fail("cutover exceeded the hard 10 minute interruption maximum");
+  } else if (event.type === "CUTOVER_ABORTED") {
+    exactKeys(p, ["operation_id", "action", "reason", "route_observation", "authority_evidence", "candidate_authoritative", "old_writes_resumed"], "cutover abort evidence");
+    const intent = [...context.events].reverse().find((item) => item.type === "ROUTE_INTENT" && item.payload.operation_id === p.operation_id)?.payload;
+    if (!intent || intent.action !== "CUTOVER" || p.action !== "CUTOVER" || p.old_writes_resumed !== true || p.candidate_authoritative !== false) fail("cutover abort must bind the open cutover intent and restore old authority");
+    validateRouteObservation(p.route_observation, intent, intent.expected_target);
+    if (p.route_observation.operation_applied_at !== null || !["NOT_APPLIED", "FAILED"].includes(p.route_observation.operation_state)) fail("unchanged cutover route requires a terminal not-applied/failed operation observation");
+    validateAuthority(p.authority_evidence, intent, true, false);
+    string(p.reason, "cutover abort reason");
+  } else if (event.type === "ROLLBACK_ABORTED") {
+    exactKeys(p, ["operation_id", "action", "reason", "route_observation", "authority_evidence", "candidate_authoritative"], "rollback abort evidence");
+    const intent = [...context.events].reverse().find((item) => item.type === "ROUTE_INTENT" && item.payload.operation_id === p.operation_id)?.payload;
+    if (!intent || intent.action !== "ROLLBACK" || p.action !== "ROLLBACK" || p.candidate_authoritative !== true) fail("rollback abort must bind the open rollback intent and retain candidate authority");
+    validateRouteObservation(p.route_observation, intent, intent.expected_target);
+    if (p.route_observation.operation_applied_at !== null || !["NOT_APPLIED", "FAILED"].includes(p.route_observation.operation_state)) fail("unchanged rollback route requires a terminal not-applied/failed operation observation");
+    validateAuthority(p.authority_evidence, intent, false, true);
+    string(p.reason, "rollback abort reason");
+  } else if (event.type === "ROUTE_UNCERTAIN") {
+    exactKeys(p, ["operation_id", "action", "condition", "reason", "observed_target", "route_observation", "authority_evidence", "writers_fenced"], "uncertain route evidence");
+    const intent = [...context.events].reverse().find((item) => item.type === "ROUTE_INTENT" && item.payload.operation_id === p.operation_id)?.payload;
+    const targetConflict = p.route_observation?.operation_state === "PENDING" || (p.condition === "UNEXPECTED_TARGET" ? [intent?.expected_target, intent?.desired_target].includes(p.observed_target) : p.condition === "DESIRED_BEFORE_MUTATION" ? p.observed_target !== intent?.desired_target || p.route_observation?.operation_applied_at !== null : p.condition === "APPLIED_BUT_REVERTED" ? p.observed_target !== intent?.expected_target || p.route_observation?.operation_applied_at === null : true);
+    if (!intent || p.action !== intent.action || targetConflict || p.writers_fenced !== true) fail("uncertain route must bind the open operation, describe the observed conflict, and fence all writers");
+    validateRouteObservation(p.route_observation, intent, p.observed_target);
+    const authority = verifyBoundEvidence(p.authority_evidence, "fenced runtime authority evidence");
+    exactKeys(authority, ["operation_id", "old_runtime_identity", "candidate_runtime_identity", "old_authoritative", "candidate_authoritative", "evidence_digest"], "fenced runtime authority evidence");
+    if (authority.operation_id !== intent.operation_id || authority.old_authoritative !== false || authority.candidate_authoritative !== false) fail("unexpected route target must fence both writers");
+    string(p.reason, "route uncertainty reason");
   } else if (event.type === "COMPLETE") {
     exactKeys(p, ["result", "runtime_adapter", "adapter_evidence"], "completion evidence");
     if (p.result !== "SUCCESS") fail("completed release result must be SUCCESS");
@@ -543,25 +633,25 @@ function validateTransition(context) {
       if (resume.action !== "resume-old-writes" || resume.freeze_token !== freeze.freeze_token || resume.runtime_identity !== plan.old_runtime.runtime_identity || resume.write_state !== "ENABLED") fail("runtime adapter did not prove old production writes resumed");
     }
   } else if (event.type === "ROLLBACK") {
-    exactKeys(p, ["explicit", "reason", "route_provenance_state", "from_runtime_identity", "restored_runtime_identity", "restored_target", "database_restore_used", "started_at", "completed_at", "rollback_safety"], "rollback evidence");
+    exactKeys(p, ["operation_id", "explicit", "reason", "route_provenance_state", "route_observation", "authority_evidence", "from_runtime_identity", "restored_runtime_identity", "restored_target", "database_restore_used", "started_at", "completed_at", "rollback_safety"], "rollback evidence");
     if (p.explicit !== true || p.route_provenance_state !== "VERIFIED") fail("rollback must be explicit and route provenance VERIFIED");
     string(p.reason, "rollback.reason");
     if (p.from_runtime_identity === p.restored_runtime_identity || p.restored_runtime_identity !== plan.old_runtime.runtime_identity) fail("rollback must restore the previous runtime identity");
     if (p.restored_target !== plan.old_runtime.route_target) fail("rollback must restore the previous route target");
     if (p.database_restore_used !== false) fail("automatic production database restore is forbidden during rollback");
-    const safety = object(p.rollback_safety, "rollback data safety evidence");
-    exactKeys(safety, ["mode", "status", "cutover_write_watermark", "candidate_write_watermark", "synchronization_id", "target_write_watermark", "preserves_candidate_writes"], "rollback data safety evidence");
     const cutover = context.events?.find?.((item) => item.type === "CUTOVER");
-    if (!cutover || safety.status !== "VERIFIED" || safety.cutover_write_watermark !== cutover.payload.candidate_write_watermark) fail("rollback data safety proof is not bound to cutover");
-    if (safety.mode === "ZERO_CANONICAL_WRITES") {
-      if (safety.candidate_write_watermark !== safety.cutover_write_watermark || safety.synchronization_id !== null || safety.preserves_candidate_writes !== true) fail("zero-write rollback proof does not prove zero canonical candidate writes");
-    } else if (safety.mode === "CURRENT_STATE_SYNC") {
-      if (!safety.synchronization_id || safety.target_write_watermark !== safety.candidate_write_watermark || safety.preserves_candidate_writes !== true) fail("current-state rollback synchronization does not preserve all candidate-era writes");
-    } else fail("rollback is blocked without zero-write or verified current-state synchronization proof");
+    if (!cutover) fail("rollback requires a recorded cutover");
+    validateRollbackSafety(p.rollback_safety, cutover.payload.candidate_write_watermark);
+    const intent = [...context.events].reverse().find((item) => item.type === "ROUTE_INTENT" && item.payload.action === "ROLLBACK")?.payload;
+    if (!intent || p.operation_id !== intent.operation_id || canonical(p.rollback_safety) !== canonical(intent.rollback_safety)) fail("rollback requires its exact durable route intent and safety proof");
+    const observation = validateRouteObservation(p.route_observation, intent, intent.desired_target);
+    if (observation.operation_applied_at === null || iso(observation.operation_applied_at, "rollback applied_at") > iso(intent.deadline_at, "rollback deadline")) fail("rollback success requires adapter-recorded application within the durable deadline");
+    validateAuthority(p.authority_evidence, intent, true, false);
+    if (p.started_at !== intent.started_at || p.completed_at !== observation.operation_applied_at) fail("rollback timestamps must come from the durable intent and adapter-recorded route application");
     const duration = iso(p.completed_at, "rollback.completed_at") - iso(p.started_at, "rollback.started_at");
     if (duration < 0 || duration > 600_000) fail("rollback exceeded the hard 10 minute interruption maximum");
     const retentionStart = cutover ? iso(cutover.payload.completed_at, "cutover.completed_at") : iso(plan.prepared_at, "prepared_at");
-    if (iso(event.occurred_at, "rollback event time") > retentionStart + 7 * 24 * 60 * 60 * 1000) fail("seven-day rollback retention window has expired");
+    if (iso(p.completed_at, "rollback applied time") > retentionStart + 7 * 24 * 60 * 60 * 1000) fail("seven-day rollback retention window had expired when the route operation was applied");
   }
   return {state: event.state, approval};
 }
@@ -569,7 +659,9 @@ function validateTransition(context) {
 function eventState(currentState, type) {
   return ({
     APPROVE: "APPROVED", PREFLIGHT_PASS: "PREFLIGHT_PASSED", CANDIDATE_UP: "CANDIDATE_UP",
-    VERIFY: "VERIFIED", FREEZE: "VERIFIED", FINAL_CONVERGENCE: "VERIFIED", CUTOVER: "CUTOVER", COMPLETE: "COMPLETED", FAIL: "FAILED", ROLLBACK: "ROLLED_BACK",
+    VERIFY: "VERIFIED", FREEZE: "VERIFIED", FINAL_CONVERGENCE: "VERIFIED", ROUTE_INTENT: currentState,
+    CUTOVER: "CUTOVER", CUTOVER_ABORTED: "FAILED", COMPLETE: "COMPLETED", FAIL: "FAILED",
+    ROLLBACK: "ROLLED_BACK", ROLLBACK_ABORTED: currentState, ROUTE_UNCERTAIN: "FAILED",
   })[type] || fail(`unknown release event type ${type}`);
 }
 
@@ -653,6 +745,7 @@ export function buildReleaseReport(journalPath) {
   const convergence = findEvent(events, "FINAL_CONVERGENCE")?.payload ?? null;
   const cutoverEvent = findEvent(events, "CUTOVER");
   const rollbackEvent = findEvent(events, "ROLLBACK");
+  const routeUncertain = findEvent(events, "ROUTE_UNCERTAIN");
   const completion = findEvent(events, "COMPLETE")?.payload.adapter_evidence ?? null;
   const failure = findEvent(events, "FAIL")?.payload ?? null;
   const retentionStart = cutoverEvent ? iso(cutoverEvent.payload.completed_at, "cutover.completed_at") : iso(plan.prepared_at, "prepared_at");
@@ -697,6 +790,7 @@ export function buildReleaseReport(journalPath) {
       data_verification: convergence.final_candidate.data_verification,
       checks: convergence.final_candidate.checks,
     } : null,
+    route_operations: events.filter((entry) => ["ROUTE_INTENT", "CUTOVER", "ROLLBACK", "CUTOVER_ABORTED", "ROLLBACK_ABORTED", "ROUTE_UNCERTAIN"].includes(entry.type)).map(({type, state, occurred_at, payload}) => ({type, state, occurred_at, operation_id: payload.operation_id, action: payload.action ?? (type === "CUTOVER" ? "CUTOVER" : type === "ROLLBACK" ? "ROLLBACK" : null), expected_target: payload.expected_target ?? null, desired_target: payload.desired_target ?? null, observed_target: payload.route_observation?.current_target ?? payload.observed_target ?? null})),
     cutover,
     candidate_write_watermark_after_cutover: completion ? {watermark: completion.candidate_write_watermark, observed_at: completion.observed_at, runtime_identity: completion.runtime_identity} : rollbackEvent ? {watermark: rollbackEvent.payload.rollback_safety.candidate_write_watermark, observed_at: rollbackEvent.payload.started_at, runtime_identity: rollbackEvent.payload.from_runtime_identity} : null,
     rollback: {
@@ -711,7 +805,7 @@ export function buildReleaseReport(journalPath) {
     runtime: {
       previous_identity: plan.old_runtime.runtime_identity,
       candidate_identity: convergence?.final_candidate?.runtime_identity ?? candidate?.runtime_identity ?? null,
-      current_identity: rollbackEvent ? rollbackEvent.payload.restored_runtime_identity : cutoverEvent ? cutoverEvent.payload.new_runtime_identity : plan.old_runtime.runtime_identity,
+      current_identity: routeUncertain ? null : rollbackEvent ? rollbackEvent.payload.restored_runtime_identity : cutoverEvent ? cutoverEvent.payload.new_runtime_identity : plan.old_runtime.runtime_identity,
     },
     failure,
   };

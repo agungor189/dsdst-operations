@@ -8,10 +8,12 @@ import {
   appendReleaseEvent,
   buildReleaseReport,
   createEvidenceDigest,
+  createRouteOperationId,
   prepareRelease,
   readReleaseJournal,
 } from "../scripts/release/release-lib.mjs";
 import {createRuntimeCaptureId} from "../scripts/validate-release-evidence.mjs";
+import {reconcileRouteOperation} from "../scripts/release/route-reconcile.mjs";
 
 const OLD_RUNTIME = `runtime-${"a".repeat(64)}`;
 
@@ -257,14 +259,66 @@ function advanceToConverged(journal) {
   append(journal, "FINAL_CONVERGENCE", finalConvergencePayload(), "2026-09-23T12:06:40.000Z");
 }
 
-function cutoverPayload(overrides = {}) {
+function routeIntentPayload(action, overrides = {}) {
+  const rollback = action === "ROLLBACK";
+  const body = {
+    release_id: "v2-17-20260923t120000z",
+    action,
+    expected_target: rollback ? "http://127.0.0.1:13000" : "http://127.0.0.1:3000",
+    desired_target: rollback ? "http://127.0.0.1:3000" : "http://127.0.0.1:13000",
+    old_runtime_identity: OLD_RUNTIME,
+    new_runtime_identity: finalConvergencePayload().final_candidate.runtime_identity,
+    freeze_token: "freeze-runtime-0001",
+    final_snapshot_id: "cutover-snapshot-1042",
+    started_at: rollback ? "2026-09-23T12:08:00.000Z" : "2026-09-23T12:05:00.000Z",
+    deadline_at: rollback ? "2026-09-23T12:18:00.000Z" : "2026-09-23T12:15:00.000Z",
+    candidate_write_watermark: "canonical-write-1042",
+    rollback_safety: rollback ? zeroWriteSafety() : null,
+    ...overrides,
+  };
+  return {...body, operation_id: createRouteOperationId(body)};
+}
+
+function routeObservation(intent, target, observedAt) {
+  const body = {operation_id: intent.operation_id, provenance_state: "VERIFIED", current_target: target, observed_at: observedAt, operation_state: target === intent.desired_target ? "APPLIED" : "NOT_APPLIED", operation_applied_at: target === intent.desired_target ? observedAt : null};
+  return {...body, evidence_digest: createEvidenceDigest(body)};
+}
+
+function authorityEvidence(intent, oldAuthoritative, candidateAuthoritative) {
+  const body = {operation_id: intent.operation_id, old_runtime_identity: OLD_RUNTIME, candidate_runtime_identity: finalConvergencePayload().final_candidate.runtime_identity, old_authoritative: oldAuthoritative, candidate_authoritative: candidateAuthoritative};
+  return {...body, evidence_digest: createEvidenceDigest(body)};
+}
+
+function cutoverPayload(intent, overrides = {}) {
   return {
-    explicit: true, approval_id: "approval-17", route_provenance_state: "VERIFIED",
+    operation_id: intent.operation_id, explicit: true, approval_id: "approval-17", route_provenance_state: "VERIFIED",
+    route_observation: routeObservation(intent, intent.desired_target, "2026-09-23T12:07:00.000Z"),
+    authority_evidence: authorityEvidence(intent, false, true),
     old_runtime_identity: OLD_RUNTIME, new_runtime_identity: finalConvergencePayload().final_candidate.runtime_identity,
     old_target: "http://127.0.0.1:3000", new_target: "http://127.0.0.1:13000",
     started_at: "2026-09-23T12:05:00.000Z", completed_at: "2026-09-23T12:07:00.000Z",
     old_stack_mode: "RETAINED_READ_ONLY_NOT_DATA_SAFE", freeze_token: "freeze-runtime-0001",
     final_snapshot_id: "cutover-snapshot-1042", candidate_write_watermark: "canonical-write-1042",
+    ...overrides,
+  };
+}
+
+function appendCutover(journal) {
+  const intent = routeIntentPayload("CUTOVER");
+  append(journal, "ROUTE_INTENT", intent, "2026-09-23T12:06:45.000Z");
+  append(journal, "CUTOVER", cutoverPayload(intent), "2026-09-23T12:07:00.000Z");
+  return intent;
+}
+
+function rollbackPayload(intent, overrides = {}) {
+  return {
+    operation_id: intent.operation_id, explicit: true, reason: "post-cutover health regression", route_provenance_state: "VERIFIED",
+    route_observation: routeObservation(intent, intent.desired_target, "2026-09-23T12:10:00.000Z"),
+    authority_evidence: authorityEvidence(intent, true, false),
+    from_runtime_identity: finalConvergencePayload().final_candidate.runtime_identity, restored_runtime_identity: OLD_RUNTIME,
+    restored_target: "http://127.0.0.1:3000", database_restore_used: false,
+    started_at: intent.started_at, completed_at: "2026-09-23T12:10:00.000Z",
+    rollback_safety: intent.rollback_safety,
     ...overrides,
   };
 }
@@ -339,7 +393,7 @@ test("7. read-only smoke failure blocks verification and cutover", () => {
 test("8. successful release evidence is complete", () => {
   const journal = tempJournal();
   advanceToConverged(journal);
-  append(journal, "CUTOVER", cutoverPayload(), "2026-09-23T12:07:00.000Z");
+  appendCutover(journal);
   append(journal, "COMPLETE", completionPayload(), "2026-09-23T12:07:30.000Z");
   const report = buildReleaseReport(journal);
   assert.equal(report.state, "COMPLETED");
@@ -350,6 +404,7 @@ test("8. successful release evidence is complete", () => {
   assert.equal(report.final_convergence.snapshot_id, "cutover-snapshot-1042");
   assert.equal(report.write_freeze.source_data_watermark, "canonical-write-1042");
   assert.equal(report.candidate_write_watermark_after_cutover.watermark, "canonical-write-1042");
+  assert.deepEqual(report.route_operations.map(({type}) => type), ["ROUTE_INTENT", "CUTOVER"]);
   assert.equal(report.rollback.used, false);
   assert.ok(report.source_set.repositories.length === 6 && report.images.length === 6);
 });
@@ -357,29 +412,21 @@ test("8. successful release evidence is complete", () => {
 test("9. rollback returns route to the previous runtime identity", () => {
   const journal = tempJournal();
   advanceToConverged(journal);
-  append(journal, "CUTOVER", cutoverPayload(), "2026-09-23T12:07:00.000Z");
+  appendCutover(journal);
   append(journal, "COMPLETE", completionPayload(), "2026-09-23T12:07:30.000Z");
-  append(journal, "ROLLBACK", {
-    explicit: true, reason: "post-cutover health regression", route_provenance_state: "VERIFIED",
-    from_runtime_identity: finalConvergencePayload().final_candidate.runtime_identity, restored_runtime_identity: OLD_RUNTIME,
-    restored_target: "http://127.0.0.1:3000", database_restore_used: false,
-    started_at: "2026-09-23T12:08:00.000Z", completed_at: "2026-09-23T12:10:00.000Z",
-    rollback_safety: zeroWriteSafety(),
-  }, "2026-09-23T12:10:00.000Z");
+  const rollbackIntent = routeIntentPayload("ROLLBACK");
+  append(journal, "ROUTE_INTENT", rollbackIntent, "2026-09-23T12:08:00.000Z");
+  append(journal, "ROLLBACK", rollbackPayload(rollbackIntent), "2026-09-23T12:10:00.000Z");
   assert.equal(buildReleaseReport(journal).runtime.current_identity, OLD_RUNTIME);
 });
 
 test("10. rollback evidence is complete and forbids automatic DB restore", () => {
   const journal = tempJournal();
   advanceToConverged(journal);
-  append(journal, "CUTOVER", cutoverPayload(), "2026-09-23T12:07:00.000Z");
-  assert.throws(() => append(journal, "ROLLBACK", {
-    explicit: true, reason: "fixture", route_provenance_state: "VERIFIED",
-    from_runtime_identity: finalConvergencePayload().final_candidate.runtime_identity, restored_runtime_identity: OLD_RUNTIME,
-    restored_target: "http://127.0.0.1:3000", database_restore_used: true,
-    started_at: "2026-09-23T12:08:00.000Z", completed_at: "2026-09-23T12:10:00.000Z",
-    rollback_safety: zeroWriteSafety(),
-  }, "2026-09-23T12:10:00.000Z"), /database restore|automatic/i);
+  appendCutover(journal);
+  const rollbackIntent = routeIntentPayload("ROLLBACK");
+  append(journal, "ROUTE_INTENT", rollbackIntent, "2026-09-23T12:08:00.000Z");
+  assert.throws(() => append(journal, "ROLLBACK", rollbackPayload(rollbackIntent, {reason: "fixture", database_restore_used: true}), "2026-09-23T12:10:00.000Z"), /database restore|automatic/i);
 });
 
 test("11. rollback retention metadata is exactly seven days", () => {
@@ -419,7 +466,8 @@ test("15. 59-minute recovery point with newer writes cannot be the cutover data 
   append(journal, "PREFLIGHT_PASS", preflightPayload(), "2026-09-23T12:02:00.000Z");
   append(journal, "CANDIDATE_UP", candidatePayload(), "2026-09-23T12:03:00.000Z");
   append(journal, "VERIFY", verificationPayload(), "2026-09-23T12:04:00.000Z");
-  assert.throws(() => append(journal, "CUTOVER", cutoverPayload(), "2026-09-23T12:07:00.000Z"), /freeze|final convergence|blocked/i);
+  const intent = routeIntentPayload("CUTOVER");
+  assert.throws(() => append(journal, "CUTOVER", cutoverPayload(intent), "2026-09-23T12:07:00.000Z"), /intent|freeze|final convergence|blocked/i);
 });
 
 test("16. final snapshot and hydrated candidate must contain the newest frozen production write", () => {
@@ -457,7 +505,8 @@ test("19. route cannot move before final hydration migration provenance and smok
   const journal = tempJournal();
   advanceToVerified(journal);
   append(journal, "FREEZE", freezePayload(), "2026-09-23T12:05:10.000Z");
-  assert.throws(() => append(journal, "CUTOVER", cutoverPayload(), "2026-09-23T12:07:00.000Z"), /final convergence|blocked/i);
+  const intent = routeIntentPayload("CUTOVER");
+  assert.throws(() => append(journal, "CUTOVER", cutoverPayload(intent), "2026-09-23T12:07:00.000Z"), /intent|final convergence|blocked/i);
   const failedSmoke = finalConvergencePayload();
   failedSmoke.final_candidate.checks.smoke.status = "FAIL";
   assert.throws(() => append(journal, "FINAL_CONVERGENCE", failedSmoke, "2026-09-23T12:06:40.000Z"), /smoke/i);
@@ -466,34 +515,28 @@ test("19. route cannot move before final hydration migration provenance and smok
 test("20. rollback after candidate writes without synchronization proof is blocked", () => {
   const journal = tempJournal();
   advanceToConverged(journal);
-  append(journal, "CUTOVER", cutoverPayload(), "2026-09-23T12:07:00.000Z");
-  assert.throws(() => append(journal, "ROLLBACK", {
-    explicit: true, reason: "fixture", route_provenance_state: "VERIFIED",
-    from_runtime_identity: finalConvergencePayload().final_candidate.runtime_identity, restored_runtime_identity: OLD_RUNTIME,
-    restored_target: "http://127.0.0.1:3000", database_restore_used: false,
-    started_at: "2026-09-23T12:08:00.000Z", completed_at: "2026-09-23T12:09:00.000Z",
-    rollback_safety: zeroWriteSafety({candidate_write_watermark: "canonical-write-1043"}),
-  }, "2026-09-23T12:09:00.000Z"), /zero canonical|synchronization|proof/i);
+  appendCutover(journal);
+  const invalid = routeIntentPayload("ROLLBACK", {candidate_write_watermark: "canonical-write-1043", rollback_safety: zeroWriteSafety({candidate_write_watermark: "canonical-write-1043"})});
+  assert.throws(() => append(journal, "ROUTE_INTENT", invalid, "2026-09-23T12:08:00.000Z"), /zero canonical|synchronization|proof/i);
 });
 
 test("21. verified current-state synchronization preserves the newest candidate write", () => {
   const journal = tempJournal();
   advanceToConverged(journal);
-  append(journal, "CUTOVER", cutoverPayload(), "2026-09-23T12:07:00.000Z");
-  append(journal, "ROLLBACK", {
-    explicit: true, reason: "fixture", route_provenance_state: "VERIFIED",
-    from_runtime_identity: finalConvergencePayload().final_candidate.runtime_identity, restored_runtime_identity: OLD_RUNTIME,
-    restored_target: "http://127.0.0.1:3000", database_restore_used: false,
-    started_at: "2026-09-23T12:08:00.000Z", completed_at: "2026-09-23T12:09:00.000Z",
-    rollback_safety: {mode: "CURRENT_STATE_SYNC", status: "VERIFIED", cutover_write_watermark: "canonical-write-1042", candidate_write_watermark: "canonical-write-1043", synchronization_id: "rollback-sync-1043", target_write_watermark: "canonical-write-1043", preserves_candidate_writes: true},
-  }, "2026-09-23T12:09:00.000Z");
+  appendCutover(journal);
+  const sync = {mode: "CURRENT_STATE_SYNC", status: "VERIFIED", cutover_write_watermark: "canonical-write-1042", candidate_write_watermark: "canonical-write-1043", synchronization_id: "rollback-sync-1043", target_write_watermark: "canonical-write-1043", preserves_candidate_writes: true};
+  const rollbackIntent = routeIntentPayload("ROLLBACK", {candidate_write_watermark: "canonical-write-1043", rollback_safety: sync, started_at: "2026-09-23T12:08:00.000Z", deadline_at: "2026-09-23T12:18:00.000Z"});
+  append(journal, "ROUTE_INTENT", rollbackIntent, "2026-09-23T12:08:00.000Z");
+  append(journal, "ROLLBACK", rollbackPayload(rollbackIntent, {reason: "fixture", completed_at: "2026-09-23T12:09:00.000Z", route_observation: routeObservation(rollbackIntent, rollbackIntent.desired_target, "2026-09-23T12:09:00.000Z")}), "2026-09-23T12:09:00.000Z");
   assert.equal(buildReleaseReport(journal).rollback.result.rollback_safety.target_write_watermark, "canonical-write-1043");
 });
 
 test("22. hard ten-minute clock starts at actual runtime freeze", () => {
   const journal = tempJournal();
   advanceToConverged(journal);
-  assert.throws(() => append(journal, "CUTOVER", cutoverPayload({completed_at: "2026-09-23T12:15:00.001Z"}), "2026-09-23T12:15:00.001Z"), /10 minute|exceeded/i);
+  const intent = routeIntentPayload("CUTOVER");
+  append(journal, "ROUTE_INTENT", intent, "2026-09-23T12:06:45.000Z");
+  assert.throws(() => append(journal, "CUTOVER", cutoverPayload(intent, {completed_at: "2026-09-23T12:15:00.001Z", route_observation: routeObservation(intent, intent.desired_target, "2026-09-23T12:15:00.001Z")}), "2026-09-23T12:15:00.001Z"), /10 minute|deadline|exceeded/i);
 });
 
 test("23. final convergence rejects raw live writable SQLite copies", () => {
@@ -503,6 +546,115 @@ test("23. final convergence rejects raw live writable SQLite copies", () => {
   const unsafe = finalConvergencePayload();
   unsafe.final_snapshot.components[0].capture_method = "raw-copy";
   assert.throws(() => append(journal, "FINAL_CONVERGENCE", unsafe, "2026-09-23T12:06:40.000Z"), /SQLite|online backup|stopped/i);
+});
+
+test("24. route changed but adapter errored is reconciled as cutover success", () => {
+  const intent = routeIntentPayload("CUTOVER");
+  let route = intent.expected_target;
+  let mutations = 0;
+  let recorded = 0;
+  reconcileRouteOperation({
+    intent, retry: false, observe: () => ({current_target: route, operation_state: route === intent.desired_target ? "APPLIED" : "NOT_APPLIED", operation_applied_at: route === intent.desired_target ? "2026-09-23T12:07:00.000Z" : null}),
+    mutate: () => { mutations += 1; route = intent.desired_target; throw new Error("timeout after external success"); },
+    onDesired: () => { recorded += 1; }, onExpected: () => assert.fail("must not abort changed route"), onUnexpected: () => assert.fail("unexpected target"),
+  });
+  assert.equal(mutations, 1);
+  assert.equal(recorded, 1);
+});
+
+test("25. route changed then controller crash before append is recoverable", () => {
+  const intent = routeIntentPayload("CUTOVER");
+  let route = intent.expected_target;
+  let mutations = 0;
+  assert.throws(() => reconcileRouteOperation({
+    intent, retry: false, observe: () => ({current_target: route, operation_state: route === intent.desired_target ? "APPLIED" : "NOT_APPLIED", operation_applied_at: route === intent.desired_target ? "2026-09-23T12:07:00.000Z" : null}),
+    mutate: () => { mutations += 1; route = intent.desired_target; },
+    onDesired: () => { throw new Error("journal append failed"); }, onExpected: () => assert.fail(), onUnexpected: () => assert.fail(),
+  }), /journal append failed/);
+  let recovered = false;
+  reconcileRouteOperation({
+    intent, retry: true, observe: () => ({current_target: route, operation_state: "APPLIED", operation_applied_at: "2026-09-23T12:07:00.000Z"}), mutate: () => { mutations += 1; },
+    onDesired: () => { recovered = true; }, onExpected: () => assert.fail(), onUnexpected: () => assert.fail(),
+  });
+  assert.equal(recovered, true);
+  assert.equal(mutations, 1);
+});
+
+test("26. retry reconciles desired route without duplicate mutation", () => {
+  const intent = routeIntentPayload("CUTOVER");
+  let mutations = 0;
+  reconcileRouteOperation({intent, retry: true, observe: () => ({current_target: intent.desired_target, operation_state: "APPLIED", operation_applied_at: "2026-09-23T12:07:00.000Z"}), mutate: () => { mutations += 1; }, onDesired: () => {}, onExpected: () => assert.fail(), onUnexpected: () => assert.fail()});
+  assert.equal(mutations, 0);
+});
+
+test("27. unchanged cutover route safely aborts and resumes only old authority", () => {
+  const journal = tempJournal();
+  advanceToConverged(journal);
+  const intent = routeIntentPayload("CUTOVER");
+  append(journal, "ROUTE_INTENT", intent, "2026-09-23T12:06:45.000Z");
+  const observation = routeObservation(intent, intent.expected_target, "2026-09-23T12:07:00.000Z");
+  let expected = false;
+  reconcileRouteOperation({intent, retry: true, observe: () => observation, mutate: () => assert.fail(), onDesired: () => assert.fail(), onExpected: () => { expected = true; }, onUnexpected: () => assert.fail()});
+  assert.equal(expected, true);
+  append(journal, "CUTOVER_ABORTED", {operation_id: intent.operation_id, action: "CUTOVER", reason: "verified unchanged", route_observation: observation, authority_evidence: authorityEvidence(intent, true, false), candidate_authoritative: false, old_writes_resumed: true}, "2026-09-23T12:07:00.000Z");
+  assert.equal(readReleaseJournal(journal).state, "FAILED");
+});
+
+test("28. unexpected third route target fails closed with both writers fenced", () => {
+  const journal = tempJournal();
+  advanceToConverged(journal);
+  const intent = routeIntentPayload("CUTOVER");
+  append(journal, "ROUTE_INTENT", intent, "2026-09-23T12:06:45.000Z");
+  const third = "http://127.0.0.1:19999";
+  const observation = routeObservation(intent, third, "2026-09-23T12:07:00.000Z");
+  let unexpected = false;
+  reconcileRouteOperation({intent, retry: false, observe: () => observation, mutate: () => assert.fail(), onDesired: () => assert.fail(), onExpected: () => assert.fail(), onUnexpected: () => { unexpected = true; }});
+  assert.equal(unexpected, true);
+  append(journal, "ROUTE_UNCERTAIN", {operation_id: intent.operation_id, action: "CUTOVER", condition: "UNEXPECTED_TARGET", reason: "third target", observed_target: third, route_observation: observation, authority_evidence: authorityEvidence(intent, false, false), writers_fenced: true}, "2026-09-23T12:07:00.000Z");
+  assert.equal(readReleaseJournal(journal).state, "FAILED");
+});
+
+test("29. rollback route changed but journal append failed remains recoverable", () => {
+  const intent = routeIntentPayload("ROLLBACK");
+  let route = intent.expected_target;
+  let mutations = 0;
+  assert.throws(() => reconcileRouteOperation({intent, retry: false, observe: () => ({current_target: route, operation_state: route === intent.desired_target ? "APPLIED" : "NOT_APPLIED", operation_applied_at: route === intent.desired_target ? "2026-09-23T12:09:00.000Z" : null}), mutate: () => { mutations += 1; route = intent.desired_target; }, onDesired: () => { throw new Error("rollback append failed"); }, onExpected: () => assert.fail(), onUnexpected: () => assert.fail()}), /rollback append failed/);
+  assert.equal(route, intent.desired_target);
+  assert.equal(mutations, 1);
+});
+
+test("30. rollback retry reconciles old route without another mutation", () => {
+  const intent = routeIntentPayload("ROLLBACK");
+  let mutations = 0;
+  let recorded = false;
+  reconcileRouteOperation({intent, retry: true, observe: () => ({current_target: intent.desired_target, operation_state: "APPLIED", operation_applied_at: "2026-09-23T12:09:00.000Z"}), mutate: () => { mutations += 1; }, onDesired: () => { recorded = true; }, onExpected: () => assert.fail(), onUnexpected: () => assert.fail()});
+  assert.equal(recorded, true);
+  assert.equal(mutations, 0);
+});
+
+test("31. route operation id is stable and binds the complete intent", () => {
+  const first = routeIntentPayload("CUTOVER");
+  const second = routeIntentPayload("CUTOVER");
+  assert.equal(first.operation_id, second.operation_id);
+  const changed = {...first, desired_target: "http://127.0.0.1:13001"};
+  delete changed.operation_id;
+  assert.notEqual(first.operation_id, createRouteOperationId(changed));
+});
+
+test("32. desired target present before a new operation is not fabricated as success", () => {
+  const intent = routeIntentPayload("CUTOVER");
+  let desired = false;
+  let condition = null;
+  reconcileRouteOperation({intent, retry: false, observe: () => ({current_target: intent.desired_target, operation_state: "NOT_APPLIED", operation_applied_at: null}), mutate: () => assert.fail(), onDesired: () => { desired = true; }, onExpected: () => assert.fail(), onUnexpected: (observation, error, value) => { condition = value; }});
+  assert.equal(desired, false);
+  assert.equal(condition, "DESIRED_BEFORE_MUTATION");
+});
+
+test("33. pending timeout result remains unresolved until later reconciliation", () => {
+  const intent = routeIntentPayload("CUTOVER");
+  let mutations = 0;
+  assert.throws(() => reconcileRouteOperation({intent, retry: true, observe: () => ({current_target: intent.expected_target, operation_state: "PENDING", operation_applied_at: null}), mutate: () => { mutations += 1; }, onDesired: () => assert.fail(), onExpected: () => assert.fail(), onUnexpected: () => assert.fail()}), /pending|retry reconciliation/i);
+  assert.equal(mutations, 0);
 });
 
 test("append-only journal detects tampering and illegal transitions", () => {

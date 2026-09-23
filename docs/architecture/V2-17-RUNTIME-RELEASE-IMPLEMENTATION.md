@@ -32,6 +32,7 @@ The generated report answers the exact source set and immutable images, approver
 - The candidate uses a distinct Compose project, network names, loopback ports, and persistent volume identities. Read-only collector evidence must prove it did not mount an old production volume.
 - All six critical health checks, read-only smoke, connectivity, and collector provenance pass before cutover.
 - Cloudflare route identity and current target are verified before mutation. Only the explicit `cutover` command can call the route adapter.
+- Every Cloudflare mutation is preceded by an fsynced, hash-chained intent with a stable idempotency key. Adapter errors and controller restarts reconcile the observed route before retry; verified desired state closes the journal without a duplicate mutation, unchanged state restores the still-authoritative writer, and any third target fences both writers.
 - Final hydration reruns migrations, runtime/schema provenance, source-watermark verification, health, read-only smoke, and connectivity before route mutation. The ten-minute hard maximum starts at the adapter-reported freeze event.
 - Cutover retains the old runtime read-only for seven days but does not claim stale old volumes are data-safe. Rollback requires verified zero candidate writes or verified current-state synchronization preserving all candidate-era writes before Cloudflare can move.
 - Rollback is explicit, restores the exact prior runtime/route identity, and rejects any automatic database restore.
