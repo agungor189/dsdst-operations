@@ -29,4 +29,7 @@ cp -R "$RESTORED_ROOT/label/data/." /target/label-data/
 mkdir -p /target/customer-hub-data/attachments
 cp -R "$RESTORED_ROOT/customer-hub/data/attachments/." /target/customer-hub-data/attachments/
 
+node --no-warnings /operations/scripts/bootstrap-seed-service-keys.mjs \
+  /target/panel-data/dsdst_panel.db
+
 printf 'Candidate bootstrap hydration completed.\n'
