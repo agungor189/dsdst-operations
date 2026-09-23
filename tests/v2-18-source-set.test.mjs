@@ -35,6 +35,8 @@ test("V2-18 CI and E2E are locked to the V2-18 exact source set", () => {
   for (const context of ["PANEL_CONTEXT", "WAREHOUSE_CONTEXT", "KIT_STUDIO_CONTEXT", "LABEL_PRINTER_CONTEXT", "CUSTOMER_HUB_CONTEXT"]) {
     assert.match(ciWorkflow, new RegExp(`${context}: \\$\\{\\{ github\\.workspace \\}\\}/`), `${context} must be wired under the CI workspace`);
   }
+  assert.match(ciWorkflow, /npm --prefix "\$PANEL_CONTEXT" ci/);
+  assert.match(ciWorkflow, /npm --prefix "\$KIT_STUDIO_CONTEXT" ci/);
   assert.match(ciWorkflow, /node scripts\/verify-source-set\.mjs --allow-operations-descendant/);
   assert.doesNotMatch(ciWorkflow, /[a-f0-9]{40}/, "CI must not duplicate source-set revisions");
 

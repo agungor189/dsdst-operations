@@ -79,6 +79,10 @@ jobs:
           npm ci --ignore-scripts
           node scripts/validate-release-evidence.mjs evidence/release-evidence.redacted.json
           node --test tests/release-evidence.test.mjs
+      - name: Install contract execution dependencies
+        run: |
+          npm --prefix "$PANEL_CONTEXT" ci
+          npm --prefix "$KIT_STUDIO_CONTEXT" ci
       - name: Architecture and orchestration regression gates
         run: npm test
       - name: Shell syntax

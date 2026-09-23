@@ -247,7 +247,7 @@ test("crash or failed final verification leaves the canonical recovery point INC
   assert.equal(JSON.parse(fs.readFileSync(candidatePath, "utf8")).status, "INCOMPLETE");
   promoteFinalRecoveryManifest(fixture.point, candidatePath, { manifestKey: MANIFEST_KEY });
   assert.equal(JSON.parse(fs.readFileSync(candidatePath, "utf8")).status, "SUCCESS");
-  fs.appendFileSync(path.join(fixture.point, "payload/panel/uploads.tar.gz"), "changed-after-upload");
+  createArchive(path.join(fixture.point, "payload/panel/uploads.tar.gz"), { "products/a.txt": "changed-after-upload" });
   assert.throws(() => finalizeRecoveryPoint(fixture.point, candidatePath, { manifestKey: MANIFEST_KEY }), /hash mismatch/i);
   assert.equal(JSON.parse(fs.readFileSync(path.join(fixture.point, "manifest.json"), "utf8")).status, "INCOMPLETE");
 });
