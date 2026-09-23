@@ -1,13 +1,20 @@
 #!/usr/bin/env sh
 set -eu
 
+: "${RECOVERY_MANIFEST_HMAC_KEY:?RECOVERY_MANIFEST_HMAC_KEY is required}"
+
 ROOT_DIR=$(CDPATH='' && cd -- "$(dirname -- "$0")/.." && pwd)
+ALLOW_LOCAL_ONLY=false
+if [ "${1:-}" = "--allow-local-only" ]; then
+  ALLOW_LOCAL_ONLY=true
+  shift
+fi
 RECOVERY_POINT=${1:-}
 BACKUP_ROOT=${OPERATIONS_BACKUP_DIR:-$ROOT_DIR/backups}
 RESTORE_ROOT=${RECOVERY_RESTORE_ROOT:-$BACKUP_ROOT/restore-staging}
 
 if [ -z "$RECOVERY_POINT" ]; then
-  echo "Usage: $0 <recovery-point-directory> [isolated-target-directory]" >&2
+  echo "Usage: $0 [--allow-local-only] <recovery-point-directory> [isolated-target-directory]" >&2
   exit 2
 fi
 
@@ -32,7 +39,11 @@ case "$TARGET" in
   *) echo "Restore target must be inside isolated root $RESTORE_ROOT" >&2; exit 1 ;;
 esac
 
-set -- "$RECOVERY_POINT" "$TARGET"
+if [ "$ALLOW_LOCAL_ONLY" = "true" ]; then
+  set -- --allow-local-only "$RECOVERY_POINT" "$TARGET"
+else
+  set -- "$RECOVERY_POINT" "$TARGET"
+fi
 for candidate in \
   "${PANEL_DATA_DIR:-}" "${PANEL_UPLOADS_DIR:-}" \
   "${KIT_STUDIO_DATA_DIR:-}" "${KIT_STUDIO_UPLOADS_DIR:-}" \

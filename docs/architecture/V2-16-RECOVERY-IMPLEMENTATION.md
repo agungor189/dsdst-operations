@@ -26,13 +26,14 @@ Panel's in-app backup configuration remains available. Its database archives alr
 4. database and L state schemas match the runtime observations;
 5. runtime OCI revisions match the exact O/P/W/K/L source-set closure;
 6. runtime image/container/config provenance is complete and redacted;
-7. the encrypted payload and encrypted manifest persist offsite and round-trip SHA-256 checks pass.
+7. the encrypted payload and HMAC-authenticated encrypted manifest persist offsite and round-trip SHA-256 checks pass;
+8. a final local verification passes immediately before the signed `SUCCESS` manifest atomically replaces the canonical `INCOMPLETE` manifest.
 
 Local verification with offsite disabled is `INCOMPLETE`. Missing/corrupt/incompatible state is `FAILED`. A failed offsite upload is `FAILED` while retaining the distinct local `VERIFIED` state in the manifest.
 
 ## Restore boundary
 
-Restore accepts one complete recovery set only. It rejects missing components, changed hashes, unsafe archive entries, SQLite corruption, schema mismatch, source/runtime mismatch, a non-empty target, a target outside the isolated restore root, and any target overlapping configured production paths. It creates new directories only. There is no production overwrite, promotion, DNS, tunnel, or Cloudflare action.
+Restore accepts one authenticated `SUCCESS`/`VERIFIED`/`PERSISTED` recovery set only. It rejects manifest tampering, missing components, changed hashes, unsafe archive entries, SQLite corruption, schema mismatch, source/runtime mismatch, a non-empty target, a target outside the isolated restore root, and any target overlapping configured production paths. A named emergency local-only override still requires HMAC and complete local verification. Monthly drills boot the isolated digest-pinned stack, wait for health, run read-only smoke checks, and tear it down. There is no production overwrite, promotion, DNS, tunnel, or Cloudflare action.
 
 ## Schema, data, and rollback impact
 

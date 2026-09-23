@@ -15,14 +15,22 @@ import {
   buildRecoveryManifest,
   calculateRecoveryHealth,
   createDrillEvidence,
+  finalizeRecoveryPoint,
   planRetention,
+  promoteFinalRecoveryManifest,
+  retentionOffsiteConfigFingerprint,
+  retentionOffsiteLocation,
   restoreRecoveryPoint,
+  signRecoveryManifest,
+  stageFinalRecoveryManifest,
   validateRestoreTarget,
   verifyRecoveryPoint,
 } from "../scripts/recovery/recovery-lib.mjs";
 import { onlineBackup } from "../scripts/recovery/sqlite-online-backup.mjs";
 
 const tempDirs = [];
+const MANIFEST_KEY = "fixture-manifest-authentication-key-material-32-bytes-minimum";
+const MANIFEST_KEY_ID = "fixture-v1";
 test.after(() => {
   for (const directory of tempDirs) fs.rmSync(directory, { recursive: true, force: true });
 });
@@ -68,7 +76,7 @@ function runtimeService(serviceId, revision, schemaKind, schemaVersion) {
 }
 
 function createRecoveryFixture({ createdAt = "2026-09-23T10:00:00.000Z" } = {}) {
-  const point = temporaryDirectory();
+  const point = path.join(temporaryDirectory(), "rp-20260923T100000Z-fixture");
   const revisions = {
     O: "0".repeat(40), P: "1".repeat(40), W: "2".repeat(40), K: "3".repeat(40), L: "4".repeat(40), HUB: "5".repeat(40),
   };
@@ -107,8 +115,32 @@ function createRecoveryFixture({ createdAt = "2026-09-23T10:00:00.000Z" } = {}) 
     createdAt,
     completedAt: "2026-09-23T10:02:00.000Z",
     offsiteEnabled: false,
+    manifestKey: MANIFEST_KEY,
+    manifestKeyId: MANIFEST_KEY_ID,
   });
   return { point, manifest };
+}
+
+function finalizeRecoveryFixture(fixture) {
+  const candidatePath = path.join(fixture.point, ".manifest.final.json");
+  stageFinalRecoveryManifest(fixture.point, candidatePath, {
+    manifestKey: MANIFEST_KEY,
+    manifestKeyId: MANIFEST_KEY_ID,
+    persistedAt: "2026-09-23T10:04:00.000Z",
+    remoteRoot: "fixture-r2:production/recovery-points/rp-20260923T100000Z-fixture",
+    configFingerprint: `sha256:${"9".repeat(64)}`,
+    payload: {
+      path: "fixture-r2:production/recovery-points/rp-20260923T100000Z-fixture/payload.tar.gz.enc",
+      sha256: "f".repeat(64),
+      sizeBytes: 123,
+    },
+    integrityEvidence: {
+      path: "fixture-r2:production/recovery-points/rp-20260923T100000Z-fixture/manifest.json.enc",
+      remoteHashVerified: true,
+    },
+  });
+  promoteFinalRecoveryManifest(fixture.point, candidatePath, { manifestKey: MANIFEST_KEY });
+  return finalizeRecoveryPoint(fixture.point, candidatePath, { manifestKey: MANIFEST_KEY });
 }
 
 test("P and K online SQLite snapshots are consistent while a WAL writer is live", async () => {
@@ -140,6 +172,8 @@ test("a verified recovery point contains complete P/K/L/Hub state, hashes, schem
   assert.equal(manifest.verification.state, "VERIFIED");
   assert.equal(manifest.status, "INCOMPLETE");
   assert.equal(manifest.offsite.state, "DISABLED");
+  assert.equal(manifest.integrity.algorithm, "HMAC-SHA256");
+  assert.equal(manifest.integrity.key_id, MANIFEST_KEY_ID);
   assert.deepEqual(Object.keys(manifest.components).sort(), [
     "customer_hub_attachments", "customer_hub_database", "kit_database", "kit_uploads",
     "label_state", "panel_database", "panel_uploads", "runtime_provenance", "source_set", "source_set_observation",
@@ -151,20 +185,20 @@ test("a verified recovery point contains complete P/K/L/Hub state, hashes, schem
   assert.equal(manifest.components.panel_database.schema_version, "67");
   assert.equal(manifest.components.kit_database.schema_version, "10");
   assert.equal(manifest.components.label_state.schema_version, "3");
-  assert.equal(verifyRecoveryPoint(point).verification.state, "VERIFIED");
+  assert.equal(verifyRecoveryPoint(point, { manifestKey: MANIFEST_KEY }).verification.state, "VERIFIED");
 });
 
 test("corruption and missing required components are rejected closed", () => {
   const corrupted = createRecoveryFixture();
   fs.appendFileSync(path.join(corrupted.point, "payload/kit/database.sqlite"), "corrupt");
-  assert.throws(() => verifyRecoveryPoint(corrupted.point), /hash mismatch/i);
+  assert.throws(() => verifyRecoveryPoint(corrupted.point, { manifestKey: MANIFEST_KEY }), /hash mismatch/i);
 
   const missing = createRecoveryFixture();
   fs.rmSync(path.join(missing.point, "payload/label/state.tar.gz"));
-  assert.throws(() => verifyRecoveryPoint(missing.point), /missing component/i);
+  assert.throws(() => verifyRecoveryPoint(missing.point, { manifestKey: MANIFEST_KEY }), /missing component/i);
 });
 
-test("offsite persistence failure is distinct and cannot produce SUCCESS", () => {
+test("offsite persistence never produces SUCCESS before atomic final verification", () => {
   const { manifest } = createRecoveryFixture();
   const failed = applyOffsiteResult(manifest, { enabled: true, state: "FAILED", error: "rclone unavailable" });
   assert.equal(failed.verification.state, "VERIFIED");
@@ -174,9 +208,32 @@ test("offsite persistence failure is distinct and cannot produce SUCCESS", () =>
     enabled: true,
     state: "PERSISTED",
     persistedAt: "2026-09-23T10:04:00.000Z",
-    payload: { path: "r2:recovery/rp.enc", sha256: "f".repeat(64), sizeBytes: 123 },
+    remoteRoot: "r2:recovery/rp",
+    payload: { path: "r2:recovery/rp/payload.tar.gz.enc", sha256: "f".repeat(64), sizeBytes: 123 },
+    integrityEvidence: { path: "r2:recovery/rp/manifest.json.enc", remoteHashVerified: true },
   });
-  assert.equal(persisted.status, "SUCCESS");
+  assert.equal(persisted.status, "INCOMPLETE");
+});
+
+test("crash or failed final verification leaves the canonical recovery point INCOMPLETE", () => {
+  const fixture = createRecoveryFixture();
+  const candidatePath = path.join(fixture.point, ".manifest.final.json");
+  stageFinalRecoveryManifest(fixture.point, candidatePath, {
+    manifestKey: MANIFEST_KEY,
+    manifestKeyId: MANIFEST_KEY_ID,
+    persistedAt: "2026-09-23T10:04:00.000Z",
+    remoteRoot: "r2:production/recovery-points/rp-20260923T100000Z-fixture",
+    configFingerprint: `sha256:${"8".repeat(64)}`,
+    payload: { path: "r2:production/recovery-points/rp-20260923T100000Z-fixture/payload.tar.gz.enc", sha256: "f".repeat(64), sizeBytes: 123 },
+    integrityEvidence: { path: "r2:production/recovery-points/rp-20260923T100000Z-fixture/manifest.json.enc", remoteHashVerified: true },
+  });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(fixture.point, "manifest.json"), "utf8")).status, "INCOMPLETE");
+  assert.equal(JSON.parse(fs.readFileSync(candidatePath, "utf8")).status, "INCOMPLETE");
+  promoteFinalRecoveryManifest(fixture.point, candidatePath, { manifestKey: MANIFEST_KEY });
+  assert.equal(JSON.parse(fs.readFileSync(candidatePath, "utf8")).status, "SUCCESS");
+  fs.appendFileSync(path.join(fixture.point, "payload/panel/uploads.tar.gz"), "changed-after-upload");
+  assert.throws(() => finalizeRecoveryPoint(fixture.point, candidatePath, { manifestKey: MANIFEST_KEY }), /hash mismatch/i);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(fixture.point, "manifest.json"), "utf8")).status, "INCOMPLETE");
 });
 
 test("recovery sets are explicitly complete snapshots and offsite uploads are encrypted", () => {
@@ -188,6 +245,9 @@ test("recovery sets are explicitly complete snapshots and offsite uploads are en
   assert.match(snapshotScript, /sqlite-online-backup\.mjs[\s\S]*kit-data/);
   assert.match(offsiteScript, /openssl enc -aes-256-cbc -pbkdf2/);
   assert.match(offsiteScript, /rclone copyto "\$PAYLOAD"/);
+  assert.match(offsiteScript, /stage-offsite-final/);
+  assert.match(offsiteScript, /promote-offsite-final/);
+  assert.match(offsiteScript, /finalize/);
   assert.doesNotMatch(offsiteScript, /rclone copyto "\$POINT/);
 });
 
@@ -196,7 +256,7 @@ test("GFS retention keeps 48h hourly, 30d daily, 12w weekly, 12m monthly and the
   const points = [];
   for (let hours = 0; hours < 24 * 400; hours += 1) {
     const createdAt = new Date(now.getTime() - hours * 3_600_000).toISOString();
-    points.push({ id: `rp-${hours}`, created_at: createdAt, status: "SUCCESS", verification: { state: "VERIFIED" } });
+    points.push({ id: `rp-${hours}`, created_at: createdAt, status: "SUCCESS", verification: { state: "VERIFIED" }, offsite: { state: "PERSISTED" } });
   }
   const plan = planRetention(points, now);
   assert.ok(plan.keep.includes("rp-0"));
@@ -208,19 +268,52 @@ test("GFS retention keeps 48h hourly, 30d daily, 12w weekly, 12m monthly and the
   assert.ok(plan.reasons.monthly.length <= 12);
   assert.ok(plan.keep.length >= 12);
 
-  const onlyGood = [{ id: "last-good", created_at: "2020-01-01T00:00:00.000Z", status: "SUCCESS", verification: { state: "VERIFIED" } }];
+  const onlyGood = [{ id: "last-good", created_at: "2020-01-01T00:00:00.000Z", status: "SUCCESS", verification: { state: "VERIFIED" }, offsite: { state: "PERSISTED" } }];
   assert.deepEqual(planRetention(onlyGood, now).delete, []);
 });
 
-test("restore rejects production paths and restores readable P/K/L state only into isolation", () => {
-  const { point } = createRecoveryFixture();
+test("retention uses only the point's authenticated exact offsite location", () => {
+  const fixture = createRecoveryFixture();
+  finalizeRecoveryFixture(fixture);
+  assert.equal(
+    retentionOffsiteLocation(fixture.point, { manifestKey: MANIFEST_KEY }),
+    "fixture-r2:production/recovery-points/rp-20260923T100000Z-fixture",
+  );
+  assert.equal(retentionOffsiteConfigFingerprint(fixture.point, { manifestKey: MANIFEST_KEY }), `sha256:${"9".repeat(64)}`);
+  const manifest = JSON.parse(fs.readFileSync(path.join(fixture.point, "manifest.json"), "utf8"));
+  manifest.offsite.location = "changed-r2:other/location";
+  fs.writeFileSync(path.join(fixture.point, "manifest.json"), JSON.stringify(manifest));
+  assert.throws(() => retentionOffsiteLocation(fixture.point, { manifestKey: MANIFEST_KEY }), /integrity/i);
+  const retentionScript = fs.readFileSync(new URL("../scripts/recovery/apply-retention.sh", import.meta.url), "utf8");
+  assert.match(retentionScript, /retention-offsite-location/);
+  assert.match(retentionScript, /retention-offsite-config-fingerprint/);
+  assert.doesNotMatch(retentionScript, /RECOVERY_OFFSITE_RCLONE_REMOTE|CLOUD_BACKUP_RCLONE_REMOTE|RECOVERY_OFFSITE_PREFIX/);
+});
+
+test("restore defaults to accepted SUCCESS/VERIFIED/PERSISTED points and local-only recovery is explicit", () => {
+  const fixture = createRecoveryFixture();
+  const { point } = fixture;
   const root = temporaryDirectory();
   const production = path.join(root, "production");
   const isolated = path.join(root, "isolated", "run-1");
   fs.mkdirSync(production, { recursive: true });
   assert.throws(() => validateRestoreTarget(production, [production]), /production/i);
   assert.throws(() => validateRestoreTarget(path.join(production, "child"), [production]), /production/i);
-  const result = restoreRecoveryPoint(point, isolated, { productionPaths: [production] });
+  assert.throws(() => restoreRecoveryPoint(point, isolated, { productionPaths: [production], manifestKey: MANIFEST_KEY }), /accepted|SUCCESS|offsite/i);
+  const failedFixture = createRecoveryFixture();
+  const failedManifest = signRecoveryManifest(applyOffsiteResult(failedFixture.manifest, {
+    enabled: true, state: "FAILED", error: "remote unavailable",
+  }), { manifestKey: MANIFEST_KEY, manifestKeyId: MANIFEST_KEY_ID });
+  fs.writeFileSync(path.join(failedFixture.point, "manifest.json"), `${JSON.stringify(failedManifest)}\n`);
+  assert.throws(() => restoreRecoveryPoint(failedFixture.point, path.join(root, "isolated", "failed"), {
+    productionPaths: [production], manifestKey: MANIFEST_KEY,
+  }), /accepted|SUCCESS|offsite/i);
+  const localOnly = path.join(root, "isolated", "local-only");
+  assert.equal(restoreRecoveryPoint(point, localOnly, {
+    productionPaths: [production], manifestKey: MANIFEST_KEY, allowLocalOnly: true,
+  }).state, "VERIFIED_LOCAL_ONLY");
+  finalizeRecoveryFixture(fixture);
+  const result = restoreRecoveryPoint(point, isolated, { productionPaths: [production], manifestKey: MANIFEST_KEY });
   assert.equal(result.state, "VERIFIED");
   const panel = new DatabaseSync(path.join(isolated, "panel/data/dsdst_panel.db"), { readOnly: true });
   const kit = new DatabaseSync(path.join(isolated, "kit/data/dsdst-kit-studio.db"), { readOnly: true });
@@ -232,6 +325,20 @@ test("restore rejects production paths and restores readable P/K/L state only in
   assert.equal(label.version, 3);
 });
 
+test("manifest tampering is rejected by verification, restore, and offsite fetch", () => {
+  const fixture = createRecoveryFixture();
+  finalizeRecoveryFixture(fixture);
+  const manifestPath = path.join(fixture.point, "manifest.json");
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  manifest.completed_at = "2026-09-23T10:03:00.000Z";
+  fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+  assert.throws(() => verifyRecoveryPoint(fixture.point, { manifestKey: MANIFEST_KEY }), /integrity/i);
+  assert.throws(() => restoreRecoveryPoint(fixture.point, path.join(temporaryDirectory(), "restore"), { manifestKey: MANIFEST_KEY }), /integrity/i);
+  const fetchScript = fs.readFileSync(new URL("../scripts/fetch-offsite-recovery.sh", import.meta.url), "utf8");
+  assert.match(fetchScript, /verify-manifest-file/);
+  assert.match(fetchScript, /RECOVERY_MANIFEST_HMAC_KEY/);
+});
+
 test("provenance or schema incompatibility is rejected", () => {
   const sourceMismatch = createRecoveryFixture();
   const runtimePath = path.join(sourceMismatch.point, "provenance/runtime.json");
@@ -240,6 +347,7 @@ test("provenance or schema incompatibility is rejected", () => {
   fs.writeFileSync(runtimePath, JSON.stringify(runtime));
   assert.throws(() => buildRecoveryManifest(sourceMismatch.point, {
     recoveryPointId: "rp-mismatch", createdAt: "2026-09-23T10:00:00.000Z", completedAt: "2026-09-23T10:02:00.000Z", offsiteEnabled: false,
+    manifestKey: MANIFEST_KEY, manifestKeyId: MANIFEST_KEY_ID,
   }), /revision mismatch/i);
 
   const schemaMismatch = createRecoveryFixture();
@@ -249,13 +357,15 @@ test("provenance or schema incompatibility is rejected", () => {
   fs.writeFileSync(schemaRuntimePath, JSON.stringify(schemaRuntime));
   assert.throws(() => buildRecoveryManifest(schemaMismatch.point, {
     recoveryPointId: "rp-schema-mismatch", createdAt: "2026-09-23T10:00:00.000Z", completedAt: "2026-09-23T10:02:00.000Z", offsiteEnabled: false,
+    manifestKey: MANIFEST_KEY, manifestKeyId: MANIFEST_KEY_ID,
   }), /schema mismatch/i);
 });
 
 test("RPO older than 60 minutes is unhealthy", () => {
   const now = new Date("2026-09-23T12:00:00.000Z");
-  assert.equal(calculateRecoveryHealth([{ status: "SUCCESS", created_at: "2026-09-23T11:01:00.000Z" }], now).healthy, true);
-  const stale = calculateRecoveryHealth([{ status: "SUCCESS", created_at: "2026-09-23T10:59:59.000Z" }], now);
+  const accepted = { status: "SUCCESS", verification: { state: "VERIFIED" }, offsite: { state: "PERSISTED" } };
+  assert.equal(calculateRecoveryHealth([{ ...accepted, created_at: "2026-09-23T11:01:00.000Z" }], now).healthy, true);
+  const stale = calculateRecoveryHealth([{ ...accepted, created_at: "2026-09-23T10:59:59.000Z" }], now);
   assert.equal(stale.healthy, false);
   assert.equal(stale.reason, "RPO_EXCEEDED");
 });
@@ -276,15 +386,62 @@ test("drill evidence records duration, source set, RPO freshness, and result out
   assert.equal(evidence.recovery_point_id, manifest.recovery_point_id);
   assert.equal(evidence.restored_source_set.length, 6);
   assert.equal(evidence.evidence_location, "OUTSIDE_PROTECTED_DATABASES");
+  assert.deepEqual(evidence.target_misses, []);
+});
+
+test("drill evidence fails closed and records explicit RPO/RTO target misses", () => {
+  const { manifest } = createRecoveryFixture();
+  const stale = createDrillEvidence(manifest, {
+    drillType: "monthly-isolated",
+    startedAt: "2026-09-23T12:10:01.000Z",
+    completedAt: "2026-09-23T13:10:02.000Z",
+    result: "SUCCESS",
+    evidencePath: "/operations-backups/evidence/drills/drill-target-miss.json",
+  });
+  assert.equal(stale.rpo_met, false);
+  assert.equal(stale.rto_met, false);
+  assert.equal(stale.result, "FAILED");
+  assert.deepEqual(stale.target_misses.map((miss) => miss.target).sort(), ["RPO", "RTO"]);
+});
+
+test("drill evidence cannot report SUCCESS after restore, health, or smoke failure", () => {
+  const { manifest } = createRecoveryFixture();
+  for (const failureStage of ["RESTORE", "HEALTH", "SMOKE"]) {
+    const evidence = createDrillEvidence(manifest, {
+      drillType: "monthly-service-level",
+      startedAt: "2026-09-23T10:10:00.000Z",
+      completedAt: "2026-09-23T10:20:00.000Z",
+      result: "SUCCESS",
+      failureStage,
+      error: `${failureStage} failed`,
+      evidencePath: `/operations-backups/evidence/drills/${failureStage}.json`,
+    });
+    assert.equal(evidence.result, "FAILED");
+    assert.ok(evidence.target_misses.some((miss) => miss.target === failureStage));
+  }
+});
+
+test("monthly drill always boots the isolated stack, checks health, runs read-only smoke, and tears down", () => {
+  const drillScript = fs.readFileSync(new URL("../scripts/restore-drill.sh", import.meta.url), "utf8");
+  const recoveryCompose = fs.readFileSync(new URL("../compose.recovery.yml", import.meta.url), "utf8");
+  assert.match(drillScript, /docker compose[\s\S]*up -d --no-build --wait/);
+  assert.match(drillScript, /run_read_only_smoke/);
+  assert.match(drillScript, /down --volumes --remove-orphans/);
+  assert.match(recoveryCompose, /ports: !reset \[\]/g);
+  assert.match(recoveryCompose, /internal: true/g);
+  assert.match(recoveryCompose, /WAREHOUSE_PRINT_DRY_RUN: "true"/);
+  assert.match(recoveryCompose, /MOCK_ADAPTERS_ENABLED: "true"/);
 });
 
 test("full drills lock every restorable service image to the recorded registry digest", () => {
-  const { point } = createRecoveryFixture();
+  const fixture = createRecoveryFixture();
+  finalizeRecoveryFixture(fixture);
+  const { point } = fixture;
   const output = execFileSync(process.execPath, [
     new URL("../scripts/recovery/recovery-cli.mjs", import.meta.url).pathname,
     "image-env",
     point,
-  ], { encoding: "utf8" });
+  ], { encoding: "utf8", env: { ...process.env, RECOVERY_MANIFEST_HMAC_KEY: MANIFEST_KEY } });
   for (const key of ["PANEL_IMAGE", "WAREHOUSE_IMAGE", "KIT_STUDIO_IMAGE", "CUSTOMER_HUB_IMAGE", "LABEL_PRINTER_IMAGE"]) {
     assert.match(output, new RegExp(`^${key}=registry\\.invalid/.+@sha256:${"a".repeat(64)}$`, "m"));
   }

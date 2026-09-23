@@ -15,10 +15,11 @@
     "components",
     "provenance",
     "verification",
-    "offsite"
+    "offsite",
+    "integrity"
   ],
   "properties": {
-    "format_version": { "const": "dsdst.recovery-point.v1" },
+    "format_version": { "const": "dsdst.recovery-point.v2" },
     "recovery_point_id": { "type": "string", "pattern": "^rp-[A-Za-z0-9._-]+$" },
     "immutable": { "const": true },
     "created_at": { "type": "string", "format": "date-time" },
@@ -70,10 +71,45 @@
     },
     "offsite": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["enabled", "state"],
       "properties": {
         "enabled": { "type": "boolean" },
-        "state": { "enum": ["PENDING", "DISABLED", "NOT_ATTEMPTED", "PERSISTED", "FAILED"] }
+        "state": { "enum": ["PENDING", "DISABLED", "NOT_ATTEMPTED", "PERSISTED", "FAILED"] },
+        "location": { "type": "string", "minLength": 1 },
+        "config_fingerprint": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+        "persisted_at": { "type": "string", "format": "date-time" },
+        "payload": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "size_bytes"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1 },
+            "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "size_bytes": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "integrity_evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "encrypted", "remote_hash_verified"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1 },
+            "encrypted": { "const": true },
+            "remote_hash_verified": { "const": true }
+          }
+        },
+        "error": { "type": "string" }
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "key_id", "value"],
+      "properties": {
+        "algorithm": { "const": "HMAC-SHA256" },
+        "key_id": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,128}$" },
+        "value": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
       }
     }
   },

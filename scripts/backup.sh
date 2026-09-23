@@ -1,6 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
+: "${RECOVERY_MANIFEST_HMAC_KEY:?RECOVERY_MANIFEST_HMAC_KEY is required}"
+
 ROOT_DIR=$(CDPATH='' && cd -- "$(dirname -- "$0")/.." && pwd)
 COMPOSE_FILE="$ROOT_DIR/compose.prod.yml"
 ENV_FILE=${ENV_FILE:-$ROOT_DIR/.env}
@@ -82,7 +84,7 @@ docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile tools run --r
   || exit 1
 
 PHASE=final-verification
-node --no-warnings "$ROOT_DIR/scripts/recovery/recovery-cli.mjs" verify "$FINAL" >/dev/null
+node --no-warnings "$ROOT_DIR/scripts/recovery/recovery-cli.mjs" verify --require-accepted "$FINAL" >/dev/null
 
 PHASE=retention
 docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile tools run --rm \

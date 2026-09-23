@@ -1,11 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-export const FORMAT_VERSION = "dsdst.recovery-point.v1";
-export const TOOL_VERSION = "v2.16.0";
+export const FORMAT_VERSION = "dsdst.recovery-point.v2";
+export const TOOL_VERSION = "v2.16.1";
 
 const COMPONENTS = Object.freeze({
   panel_database: { path: "payload/panel/database.sqlite", kind: "sqlite", runtime: "dsdst-panel" },
@@ -29,6 +29,76 @@ const SOURCE_RUNTIME = Object.freeze({
 
 function fail(message) {
   throw new Error(message);
+}
+
+function manifestKey(options = {}) {
+  const value = options.manifestKey ?? process.env.RECOVERY_MANIFEST_HMAC_KEY;
+  if (typeof value !== "string" || Buffer.byteLength(value, "utf8") < 32) {
+    fail("RECOVERY_MANIFEST_HMAC_KEY must provide at least 32 bytes of external key material");
+  }
+  return Buffer.from(value, "utf8");
+}
+
+function canonicalValue(value) {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalValue(value[key])]));
+  }
+  return value;
+}
+
+function manifestAuthenticationPayload(manifest) {
+  const unsigned = structuredClone(manifest);
+  delete unsigned.integrity;
+  return JSON.stringify(canonicalValue(unsigned));
+}
+
+export function signRecoveryManifest(manifest, options = {}) {
+  const signed = structuredClone(manifest);
+  delete signed.integrity;
+  const keyId = String(options.manifestKeyId ?? process.env.RECOVERY_MANIFEST_HMAC_KEY_ID ?? "external-v1");
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(keyId)) fail("Invalid recovery manifest key ID");
+  signed.integrity = {
+    algorithm: "HMAC-SHA256",
+    key_id: keyId,
+    value: createHmac("sha256", manifestKey(options)).update(manifestAuthenticationPayload(signed)).digest("hex"),
+  };
+  return signed;
+}
+
+export function verifyManifestIntegrity(manifest, options = {}) {
+  if (manifest?.integrity?.algorithm !== "HMAC-SHA256" ||
+      typeof manifest.integrity.key_id !== "string" ||
+      !/^[a-f0-9]{64}$/.test(manifest.integrity.value || "")) {
+    fail("Recovery manifest authenticated integrity evidence is missing or invalid");
+  }
+  const observed = createHmac("sha256", manifestKey(options))
+    .update(manifestAuthenticationPayload(manifest))
+    .digest();
+  const expected = Buffer.from(manifest.integrity.value, "hex");
+  if (expected.length !== observed.length || !timingSafeEqual(expected, observed)) {
+    fail("Recovery manifest authenticated integrity verification failed");
+  }
+  return manifest;
+}
+
+function atomicWriteJson(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const temporary = path.join(path.dirname(filePath), `.${path.basename(filePath)}.${randomUUID()}.tmp`);
+  const descriptor = fs.openSync(temporary, "wx", 0o640);
+  try {
+    fs.writeFileSync(descriptor, `${JSON.stringify(value, null, 2)}\n`);
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  fs.renameSync(temporary, filePath);
+  const directory = fs.openSync(path.dirname(filePath), "r");
+  try {
+    fs.fsyncSync(directory);
+  } finally {
+    fs.closeSync(directory);
+  }
 }
 
 function readJson(filePath, description) {
@@ -208,28 +278,31 @@ export function buildRecoveryManifest(pointPath, options) {
   const components = inspectComponents(pointPath);
   const provenance = validateProvenance(pointPath, components);
   const checkedAt = completedAt.toISOString();
-  const manifest = {
+  const manifest = signRecoveryManifest({
     format_version: FORMAT_VERSION,
     recovery_point_id: recoveryPointId,
     immutable: true,
     created_at: createdAt.toISOString(),
     completed_at: completedAt.toISOString(),
     tool: { name: "dsdst-operations-recovery", version: TOOL_VERSION, backup_type: "complete-online-snapshot" },
-    status: options.offsiteEnabled ? "INCOMPLETE" : "INCOMPLETE",
+    status: "INCOMPLETE",
     components,
     provenance,
     verification: { state: "VERIFIED", checked_at: checkedAt, checks: ["sha256", "size", "sqlite-integrity", "schema", "source-set", "runtime-provenance"] },
     offsite: { enabled: Boolean(options.offsiteEnabled), state: options.offsiteEnabled ? "PENDING" : "DISABLED" },
-  };
-  fs.writeFileSync(path.join(pointPath, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o640 });
+  }, options);
+  atomicWriteJson(path.join(pointPath, "manifest.json"), manifest);
   return manifest;
 }
 
 export function applyOffsiteResult(manifest, result) {
   const next = structuredClone(manifest);
+  delete next.integrity;
   next.offsite = {
     enabled: Boolean(result.enabled),
     state: result.state,
+    ...(result.remoteRoot ? { location: result.remoteRoot } : {}),
+    ...(result.configFingerprint ? { config_fingerprint: result.configFingerprint } : {}),
     ...(result.persistedAt ? { persisted_at: result.persistedAt } : {}),
     ...(result.payload ? {
       payload: {
@@ -238,18 +311,53 @@ export function applyOffsiteResult(manifest, result) {
         size_bytes: result.payload.sizeBytes,
       },
     } : {}),
+    ...(result.integrityEvidence ? {
+      integrity_evidence: {
+        path: result.integrityEvidence.path,
+        encrypted: true,
+        remote_hash_verified: result.integrityEvidence.remoteHashVerified === true,
+      },
+    } : {}),
     ...(result.error ? { error: String(result.error).slice(0, 1000) } : {}),
   };
-  next.status = next.verification?.state === "VERIFIED" && next.offsite.state === "PERSISTED" ? "SUCCESS" :
-    next.offsite.state === "FAILED" ? "FAILED" : "INCOMPLETE";
+  next.status = next.offsite.state === "FAILED" ? "FAILED" : "INCOMPLETE";
   return next;
 }
 
-export function verifyRecoveryPoint(pointPath) {
-  const manifestPath = path.join(pointPath, "manifest.json");
-  if (!fs.existsSync(manifestPath)) fail("Recovery manifest is missing");
-  const manifest = readJson(manifestPath, "Recovery manifest");
+function assertPersistedOffsiteEvidence(manifest) {
+  if (manifest.verification?.state !== "VERIFIED" || manifest.offsite?.state !== "PERSISTED") {
+    fail("Recovery point is missing VERIFIED local or PERSISTED offsite state");
+  }
+  if (manifest.offsite.enabled !== true || typeof manifest.offsite.location !== "string" || manifest.offsite.location.length === 0) {
+    fail("Accepted recovery point is missing its exact offsite location");
+  }
+  if (!/^sha256:[a-f0-9]{64}$/.test(manifest.offsite.config_fingerprint || "")) {
+    fail("Accepted recovery point is missing its redacted offsite configuration fingerprint");
+  }
+  const payload = manifest.offsite.payload;
+  const evidence = manifest.offsite.integrity_evidence;
+  if (!payload || !/^[a-f0-9]{64}$/.test(payload.sha256 || "") || payload.size_bytes <= 0 ||
+      typeof payload.path !== "string" || !payload.path.startsWith(`${manifest.offsite.location}/`)) {
+    fail("Accepted recovery point is missing verified encrypted payload evidence");
+  }
+  if (!evidence || evidence.encrypted !== true || evidence.remote_hash_verified !== true ||
+      typeof evidence.path !== "string" || !evidence.path.startsWith(`${manifest.offsite.location}/`)) {
+    fail("Accepted recovery point is missing verified encrypted manifest integrity evidence");
+  }
+}
+
+export function assertAcceptedManifest(manifest) {
+  if (manifest.status !== "SUCCESS") {
+    fail("Recovery point is not accepted: status=SUCCESS, verification=VERIFIED, and offsite=PERSISTED are required");
+  }
+  assertPersistedOffsiteEvidence(manifest);
+}
+
+function verifyManifestAgainstPoint(pointPath, manifest, options = {}) {
+  verifyManifestIntegrity(manifest, options);
   if (manifest.format_version !== FORMAT_VERSION) fail("Unsupported recovery manifest format");
+  if (manifest.recovery_point_id !== path.basename(pointPath)) fail("Recovery manifest ID does not match its directory");
+  if (manifest.verification?.state !== "VERIFIED") fail("Recovery point local verification is not VERIFIED");
   const observed = inspectComponents(pointPath);
   for (const name of Object.keys(COMPONENTS)) {
     const expected = manifest.components?.[name];
@@ -260,7 +368,78 @@ export function verifyRecoveryPoint(pointPath) {
     if (expected.schema_version !== observed[name].schema_version) fail(`Component schema mismatch: ${name}`);
   }
   validateProvenance(pointPath, observed);
+  if (options.requireAccepted) assertAcceptedManifest(manifest);
   return manifest;
+}
+
+export function verifyRecoveryPoint(pointPath, options = {}) {
+  const manifestPath = path.resolve(options.manifestPath || path.join(pointPath, "manifest.json"));
+  if (!fs.existsSync(manifestPath)) fail("Recovery manifest is missing");
+  const manifest = readJson(manifestPath, "Recovery manifest");
+  return verifyManifestAgainstPoint(pointPath, manifest, options);
+}
+
+export function stageFinalRecoveryManifest(pointPath, candidatePath, options = {}) {
+  if (path.resolve(candidatePath) === path.resolve(pointPath, "manifest.json")) fail("Final manifest candidate must not replace the canonical manifest before finalization");
+  const current = verifyRecoveryPoint(pointPath, options);
+  if (current.status === "SUCCESS") fail("Recovery point is already SUCCESS");
+  const next = applyOffsiteResult(current, {
+    enabled: true,
+    state: "PERSISTED",
+    remoteRoot: options.remoteRoot,
+    configFingerprint: options.configFingerprint,
+    persistedAt: options.persistedAt,
+    payload: options.payload,
+    integrityEvidence: options.integrityEvidence,
+  });
+  const signed = signRecoveryManifest(next, options);
+  verifyManifestAgainstPoint(pointPath, signed, options);
+  assertPersistedOffsiteEvidence(signed);
+  atomicWriteJson(candidatePath, signed);
+  return signed;
+}
+
+export function promoteFinalRecoveryManifest(pointPath, candidatePath, options = {}) {
+  if (path.resolve(candidatePath) === path.resolve(pointPath, "manifest.json")) fail("Final manifest candidate must remain separate until finalization");
+  const current = verifyRecoveryPoint(pointPath, options);
+  if (current.status === "SUCCESS") fail("Recovery point is already SUCCESS");
+  const staged = readJson(candidatePath, "Staged offsite recovery manifest");
+  if (staged.recovery_point_id !== current.recovery_point_id) fail("Staged recovery manifest ID mismatch");
+  verifyManifestAgainstPoint(pointPath, staged, options);
+  assertPersistedOffsiteEvidence(staged);
+  staged.status = "SUCCESS";
+  const signed = signRecoveryManifest(staged, options);
+  verifyManifestAgainstPoint(pointPath, signed, { ...options, requireAccepted: true });
+  atomicWriteJson(candidatePath, signed);
+  return signed;
+}
+
+export function finalizeRecoveryPoint(pointPath, candidatePath, options = {}) {
+  const canonicalPath = path.join(pointPath, "manifest.json");
+  if (path.resolve(candidatePath) === path.resolve(canonicalPath)) fail("Final manifest candidate must be separate from the canonical manifest");
+  const current = verifyRecoveryPoint(pointPath, options);
+  if (current.status === "SUCCESS") fail("Recovery point is already SUCCESS");
+  const candidate = readJson(candidatePath, "Final recovery manifest candidate");
+  if (candidate.recovery_point_id !== current.recovery_point_id) fail("Final recovery manifest candidate ID mismatch");
+  verifyManifestAgainstPoint(pointPath, candidate, { ...options, requireAccepted: true });
+  fs.renameSync(candidatePath, canonicalPath);
+  const directory = fs.openSync(pointPath, "r");
+  try {
+    fs.fsyncSync(directory);
+  } finally {
+    fs.closeSync(directory);
+  }
+  return candidate;
+}
+
+export function retentionOffsiteLocation(pointPath, options = {}) {
+  const manifest = verifyRecoveryPoint(pointPath, { ...options, requireAccepted: true });
+  return manifest.offsite.location;
+}
+
+export function retentionOffsiteConfigFingerprint(pointPath, options = {}) {
+  const manifest = verifyRecoveryPoint(pointPath, { ...options, requireAccepted: true });
+  return manifest.offsite.config_fingerprint;
 }
 
 function isInside(candidate, root) {
@@ -287,7 +466,10 @@ function extractArchive(archivePath, targetPath) {
 }
 
 export function restoreRecoveryPoint(pointPath, targetPath, options = {}) {
-  const manifest = verifyRecoveryPoint(pointPath);
+  const manifest = verifyRecoveryPoint(pointPath, {
+    ...options,
+    requireAccepted: options.allowLocalOnly !== true,
+  });
   const target = validateRestoreTarget(targetPath, options.productionPaths || []);
   const staging = `${target}.partial-${randomUUID()}`;
   fs.mkdirSync(staging, { recursive: true, mode: 0o750 });
@@ -309,7 +491,11 @@ export function restoreRecoveryPoint(pointPath, targetPath, options = {}) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     if (fs.existsSync(target)) fs.rmdirSync(target);
     fs.renameSync(staging, target);
-    return { state: "VERIFIED", recoveryPointId: manifest.recovery_point_id, target };
+    return {
+      state: options.allowLocalOnly === true ? "VERIFIED_LOCAL_ONLY" : "VERIFIED",
+      recoveryPointId: manifest.recovery_point_id,
+      target,
+    };
   } catch (error) {
     fs.rmSync(staging, { recursive: true, force: true });
     throw error;
@@ -335,7 +521,8 @@ function utcMonth(date) {
 
 export function planRetention(points, now = new Date()) {
   const valid = points
-    .filter((point) => point?.verification?.state === "VERIFIED" && point.status === "SUCCESS" && Number.isFinite(new Date(point.created_at).getTime()))
+    .filter((point) => point?.verification?.state === "VERIFIED" && point.status === "SUCCESS" &&
+      point.offsite?.state === "PERSISTED" && Number.isFinite(new Date(point.created_at).getTime()))
     .sort((left, right) => new Date(right.created_at) - new Date(left.created_at));
   const keep = new Set();
   const reasons = { hourly: [], daily: [], weekly: [], monthly: [], last_known_good: [] };
@@ -368,7 +555,7 @@ export function planRetention(points, now = new Date()) {
 
 export function calculateRecoveryHealth(points, now = new Date()) {
   const latest = points
-    .filter((point) => point.status === "SUCCESS")
+    .filter((point) => point.status === "SUCCESS" && point.verification?.state === "VERIFIED" && point.offsite?.state === "PERSISTED")
     .map((point) => ({ ...point, time: new Date(point.created_at).getTime() }))
     .filter((point) => Number.isFinite(point.time))
     .sort((left, right) => right.time - left.time)[0];
@@ -383,6 +570,18 @@ export function createDrillEvidence(manifest, input) {
   if (Number.isNaN(startedAt.getTime()) || Number.isNaN(completedAt.getTime()) || completedAt < startedAt) fail("Invalid drill timestamps");
   const durationSeconds = Math.round((completedAt - startedAt) / 1000);
   const freshnessMinutes = Math.max(0, (startedAt - new Date(manifest.created_at)) / 60000);
+  const rtoMet = durationSeconds <= 3600;
+  const rpoMet = freshnessMinutes <= 60;
+  const targetMisses = [];
+  if (!rpoMet) targetMisses.push({ target: "RPO", target_minutes: 60, observed_minutes: freshnessMinutes });
+  if (!rtoMet) targetMisses.push({ target: "RTO", target_seconds: 3600, observed_seconds: durationSeconds });
+  if (input.failureStage) {
+    const target = String(input.failureStage).toUpperCase();
+    if (!targetMisses.some((miss) => miss.target === target)) {
+      targetMisses.push({ target, reason: String(input.error || "drill check failed").slice(0, 1000) });
+    }
+  }
+  const result = input.result === "SUCCESS" && targetMisses.length === 0 ? "SUCCESS" : "FAILED";
   return {
     evidence_version: "dsdst.recovery-drill.v1",
     drill_id: input.drillId || `drill-${randomUUID()}`,
@@ -393,12 +592,13 @@ export function createDrillEvidence(manifest, input) {
     completed_at: completedAt.toISOString(),
     duration_seconds: durationSeconds,
     rto_target_seconds: 3600,
-    rto_met: durationSeconds <= 3600,
+    rto_met: rtoMet,
     rpo_freshness_minutes_at_start: freshnessMinutes,
     rpo_target_minutes: 60,
-    rpo_met: freshnessMinutes <= 60,
+    rpo_met: rpoMet,
     restored_source_set: manifest.provenance.source_set.repositories,
-    result: input.result,
+    result,
+    target_misses: targetMisses,
     ...(input.error ? { error: String(input.error).slice(0, 2000) } : {}),
     evidence_path: input.evidencePath,
     evidence_location: "OUTSIDE_PROTECTED_DATABASES",
