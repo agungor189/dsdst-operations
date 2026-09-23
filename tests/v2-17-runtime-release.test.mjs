@@ -15,7 +15,7 @@ import {createRuntimeCaptureId} from "../scripts/validate-release-evidence.mjs";
 const OLD_RUNTIME = `runtime-${"a".repeat(64)}`;
 
 const SOURCE_REVISIONS = {
-  O: "e64142f18eb6a2c3fe7c0f084a393c0871c76ee6",
+  O: "dffac354318cb4ebd826bc282fc0788a4e5aad18",
   P: "61ed1ad8fba25ed9d5c0b228308ff22da45febaf",
   W: "525e18c508c1191c0c4e4b725bda00defd930d2f",
   K: "0e0717c3f8d3f3f0af186b4c165524bc2e81724c",
