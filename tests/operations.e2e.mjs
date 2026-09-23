@@ -191,7 +191,6 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
   await request(warehouseUrl, "/api/orders", { cookie: revokedWarehouseCookie, expect: 401 });
 
   const sku = `OPS-${Date.now()}`;
-  const supplierCode = `SUP-${Date.now()}`;
   const lot = `LOT-${Date.now()}`;
   const productId = `product-${Date.now()}`;
   const createdProduct = await request(panelUrl, "/api/catalog-admin/v1/products", {
@@ -208,65 +207,58 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
   assert.ok(product, "versioned product must be discoverable through the Panel product API");
   assert.equal(Number(product.central_stock), 0, "catalog creation must not create physical stock");
 
-  const createdLocation = await request(warehouseUrl, "/api/admin/locations", {
-    method: "POST",
-    cookie: warehouseCookie,
-    body: { code: "Z9-K1-P1", package_capacity: 4, purpose: "PICK" },
-    expect: 201,
-  });
-  assert.equal(createdLocation.payload.data.code, "Z9-K1-P1");
-
-  await request(warehouseUrl, "/api/admin/layouts/import-legacy", {
-    method: "POST",
-    cookie: warehouseCookie,
-    body: {
-      warehouseConfig: { name: "Operations E2E", width: 6, length: 4, height: 3 },
-      objects: [{ id: "rack-z9", type: "rack", name: "Z9", rackCode: "Z9", x: 0, z: 0, width: 2, depth: 1, height: 2, shelfCount: 1, binsPerShelf: 1 }],
-    },
-    expect: 201,
-  });
-
-  const csvText = `sku,pick_face_location,reserve_locations\n${sku},Z9-K1-P1,\n`;
-  const layoutPreview = await request(warehouseUrl, "/api/admin/layouts/placement/preview", {
-    method: "POST",
-    cookie: warehouseCookie,
-    body: { source_filename: "operations-e2e-layout.csv", csv_text: csvText },
-  });
-  assert.equal(layoutPreview.payload.data.valid, true);
-  await request(warehouseUrl, "/api/admin/layouts/placement/apply", {
-    method: "POST",
-    cookie: warehouseCookie,
-    body: {
-      source_filename: "operations-e2e-layout.csv",
-      csv_text: csvText,
-      preview_hash: layoutPreview.payload.data.preview_hash,
-      notes: "isolated operations e2e",
-    },
-    expect: 201,
-  });
-
-  const stagedRows = [{ SKU: sku, supplier_code: supplierCode, package_count: 2, units_per_package: 5, total_units: 10, lot }];
-  const batch = await request(warehouseUrl, "/api/admin/batches", {
-    method: "POST",
-    cookie: warehouseCookie,
-    body: { supplier_code: supplierCode, supplier_name: "Operations Supplier", source_filename: "operations-e2e.csv" },
-    expect: 201,
-  });
-  const batchPreview = await request(warehouseUrl, `/api/admin/batches/${batch.payload.data.id}/import/preview`, {
-    method: "POST", cookie: warehouseCookie, body: { rows: stagedRows },
-  });
-  assert.equal(batchPreview.payload.data.valid, true);
-  await request(warehouseUrl, `/api/admin/batches/${batch.payload.data.id}/import/apply`, {
+  const locationCode = "Z9-K1-P1-F";
+  await request(warehouseUrl, "/api/execution/topology", {
     method: "POST", cookie: warehouseCookie,
-    body: { rows: stagedRows, preview_hash: batchPreview.payload.data.preview_hash },
+    body: {
+      idempotency_key: `topology-${productId}`,
+      topology: {
+        id: `topology-${productId}`, name: "Operations E2E", codeTemplate: "{rack}-K{level}-P{position}-{depth}",
+        racks: [{ code: "Z9", levelCount: 1, positionCount: 6,
+          depths: [{ code: "F", isFront: true, priority: 0 }], role: "PICKING",
+          allowMixedSku: false, allowMixedLot: false, placementPriority: 0 }],
+      },
+    },
   });
-  const claimed = await request(warehouseUrl, "/api/admin/packages/claim-next", {
-    method: "POST",
-    cookie: warehouseCookie,
-    body: { supplier_code: supplierCode, device_id: "operations-e2e" },
+
+  const supplierId = `supplier-${Date.now()}`;
+  const purchaseId = `purchase-${Date.now()}`;
+  await request(panelUrl, "/api/procurement/v1/suppliers", {
+    method: "POST", cookie: panelCookie, headers: { "x-operation-id": `register-${supplierId}` },
+    body: { id: supplierId, name: "Operations Supplier", defaultCurrency: "TRY" }, expect: 201,
   });
-  const pkg = claimed.payload.data;
-  assert.equal(pkg.package_number, 1);
+  await request(panelUrl, "/api/procurement/v1/purchases", {
+    method: "POST", cookie: panelCookie, headers: { "x-operation-id": `create-${purchaseId}` },
+    body: {
+      id: purchaseId, supplierId, acquisitionCostVatPolicy: "VAT_EXCLUDED_FROM_INVENTORY_COST",
+      invoiceNumber: `INV-${purchaseId}`, invoiceDate: new Date().toISOString().slice(0, 10),
+      lines: [{ id: `${purchaseId}-line`, productId: product.id, quantity: "5", quoteBasis: "piece",
+        supplierUnitPriceMinor: 1_000, currency: "TRY", vatMode: "EXCLUDED", vatRateBps: 0 }],
+    },
+    expect: 201,
+  });
+  const finalizedCosts = await request(panelUrl, `/api/procurement/v1/purchases/${purchaseId}/finalize-costs`, {
+    method: "POST", cookie: panelCookie, headers: { "x-operation-id": `finalize-${purchaseId}` }, body: { allocations: [] },
+  });
+  const costSnapshot = finalizedCosts.payload.data.lots[0];
+  assert.equal(costSnapshot.state, "COSTED_PENDING_RECEIPT");
+  const receiptId = `receipt-${purchaseId}`;
+  const packageId = `package-${purchaseId}`;
+  const receipt = await request(warehouseUrl, "/api/execution/receipts", {
+    method: "POST", cookie: warehouseCookie,
+    body: {
+      idempotency_key: `receive-${purchaseId}`, receiptId, receiptSeriesId: `series-${purchaseId}`,
+      stageIndex: 1, isFinal: true, costSnapshotId: costSnapshot.id, supplierLotCode: lot,
+      acceptedQuantityBaseInt: 5, damagedQuantityBaseInt: 0, receivedAt: new Date().toISOString(),
+      packages: [{ id: packageId, code: `PKG-${Date.now()}`, quantityBaseInt: 5,
+        targetQuantityBaseInt: 5, weightGrams: 635, disposition: "ACCEPTED" }],
+    },
+  });
+  const pkg = receipt.payload.data.packages[0];
+  assert.equal(pkg.initialQuantityBaseInt, 5);
+  const afterReceiptProducts = await request(panelUrl, "/api/products", { cookie: panelCookie });
+  const stockAfterReceipt = Number(afterReceiptProducts.payload.find((candidate) => candidate.id === product.id).central_stock);
+  assert.equal(stockAfterReceipt, 5, "only the approved Warehouse receipt boundary may create physical stock");
 
   const currentState = await request(labelPrinterUrl, "/api/state", { cookie: labelCookie });
   const v1 = template("operations-goods-receipt-v1", "LIVE-V1");
@@ -276,7 +268,7 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
     headers: { "If-Match": String(currentState.payload.revision) },
     body: { ...currentState.payload, template: v1, templates: [v1] },
   });
-  const previewBody = { purpose: "goods_receipt", data: { SKU: sku, Package_code: pkg.package_code, Paket_no: "1 / 2", Malzeme: "Alüminyum" } };
+  const previewBody = { purpose: "goods_receipt", data: { SKU: sku, Package_code: pkg.code, Paket_no: "1 / 2", Malzeme: "Alüminyum" } };
   const previewV1 = await request(warehouseUrl, "/api/labels/preview", { method: "POST", cookie: warehouseCookie, body: previewBody });
   assert.equal(previewV1.response.headers.get("x-label-template-id"), v1.id);
   assert.equal(previewV1.payload.subarray(0, 4).toString(), "%PDF");
@@ -304,45 +296,23 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
     return jobs.payload.data.find((job) => job.id === printJobId && job.status === "RENDERED");
   });
 
-  await request(warehouseUrl, "/api/admin/placements", {
+  await request(warehouseUrl, `/api/execution/packages/${pkg.id}/identity`, {
     method: "POST",
     cookie: warehouseCookie,
-    body: { package_code: pkg.package_code, location_code: "Z9-K1-P1", idempotency_key: `place-${pkg.id}`, device_id: "operations-e2e" },
+    body: { labelIdentity: pkg.code, idempotency_key: `identify-${pkg.id}` },
   });
+  const suggestion = await request(warehouseUrl, `/api/execution/packages/${pkg.id}/suggestion`, { cookie: warehouseCookie });
+  assert.equal(suggestion.payload.data.code, locationCode);
+  await request(warehouseUrl, `/api/execution/packages/${pkg.id}/place`, {
+    method: "POST",
+    cookie: warehouseCookie,
+    body: { destinationCode: locationCode, scannedDestinationCode: locationCode, idempotency_key: `place-${pkg.id}` },
+  });
+  const placedPackage = await request(warehouseUrl, `/api/execution/packages/${pkg.id}`, { cookie: warehouseCookie });
+  assert.equal(placedPackage.payload.data.currentLocationCode, locationCode);
   const afterPlacementProducts = await request(panelUrl, "/api/products", { cookie: panelCookie });
-  assert.equal(Number(afterPlacementProducts.payload.find((candidate) => candidate.id === product.id).central_stock), 0,
-    "package placement is a Warehouse projection and must not create canonical stock");
-
-  const supplierId = `supplier-${Date.now()}`;
-  const purchaseId = `purchase-${Date.now()}`;
-  await request(panelUrl, "/api/procurement/v1/suppliers", {
-    method: "POST", cookie: panelCookie, headers: { "x-operation-id": `register-${supplierId}` },
-    body: { id: supplierId, name: "Operations Supplier", defaultCurrency: "TRY" }, expect: 201,
-  });
-  await request(panelUrl, "/api/procurement/v1/purchases", {
-    method: "POST", cookie: panelCookie, headers: { "x-operation-id": `create-${purchaseId}` },
-    body: {
-      id: purchaseId, supplierId, acquisitionCostVatPolicy: "VAT_EXCLUDED_FROM_INVENTORY_COST",
-      invoiceNumber: `INV-${purchaseId}`, invoiceDate: new Date().toISOString().slice(0, 10),
-      lines: [{ id: `${purchaseId}-line`, productId: product.id, quantity: "5", quoteBasis: "piece",
-        supplierUnitPriceMinor: 1_000, currency: "TRY", vatMode: "EXCLUDED", vatRateBps: 0 }],
-    },
-    expect: 201,
-  });
-  const finalizedCosts = await request(panelUrl, `/api/procurement/v1/purchases/${purchaseId}/finalize-costs`, {
-    method: "POST", cookie: panelCookie, headers: { "x-operation-id": `finalize-${purchaseId}` }, body: { allocations: [] },
-  });
-  const costSnapshot = finalizedCosts.payload.data.lots[0];
-  assert.equal(costSnapshot.state, "COSTED_PENDING_RECEIPT");
-  await request(panelUrl, "/api/inventory/v1/receipts", {
-    method: "POST", cookie: panelCookie, headers: { "x-operation-id": `receive-${purchaseId}` },
-    body: { receiptId: `receipt-${purchaseId}`, costSnapshotId: costSnapshot.id, receivedAt: new Date().toISOString(),
-      location: { id: "Z9-K1-P1", kind: "PICKING" } },
-    expect: 201,
-  });
-  const afterReceiptProducts = await request(panelUrl, "/api/products", { cookie: panelCookie });
-  const stockAfterReceipt = Number(afterReceiptProducts.payload.find((candidate) => candidate.id === product.id).central_stock);
-  assert.equal(stockAfterReceipt, 5, "only the approved canonical receipt may create physical stock");
+  const stockAfterPlacement = Number(afterPlacementProducts.payload.find((candidate) => candidate.id === product.id).central_stock);
+  assert.equal(stockAfterPlacement, stockAfterReceipt, "package placement must not post a second canonical stock movement");
 
   const accounts = await request(panelUrl, "/api/cash-accounts", { cookie: panelCookie });
   const cashAccount = accounts.payload.find((account) => account.is_active !== 0 && account.type === "cash") || accounts.payload[0];
@@ -386,8 +356,8 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
   const afterPickProducts = await request(panelUrl, "/api/products", { cookie: panelCookie });
   const stockAfterPick = Number(afterPickProducts.payload.find((candidate) => candidate.id === product.id).central_stock);
   assert.deepEqual(
-    { stockAfterReceipt, stockAfterSale, stockAfterPick },
-    { stockAfterReceipt: 5, stockAfterSale: 5, stockAfterPick: 5 },
+    { stockAfterReceipt, stockAfterPlacement, stockAfterSale, stockAfterPick },
+    { stockAfterReceipt: 5, stockAfterPlacement: 5, stockAfterSale: 5, stockAfterPick: 5 },
     "KNOWN BUSINESS RED: sale acceptance and internal pick must not post physical OUT before the owner-approved dispatch boundary",
   );
 });
