@@ -320,6 +320,7 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
   const sale = await request(panelUrl, "/api/sales", {
     method: "POST",
     cookie: panelCookie,
+    headers: { "x-operation-id": `sale-${productId}` },
     body: {
       customer_name: "Operations E2E",
       total_quantity: 1,
@@ -327,7 +328,24 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
       total_amount: 100,
       platform: "Satış Sistemi",
       cash_account_id: cashAccount.id,
-      items: [{ product_id: product.id, product_name: "Operations Dirsek", quantity: 1, price: 100, weight: 0.1273 }],
+      currency: "TRY",
+      discount_minor: 0,
+      commission_rate: 10,
+      commission_calculation_basis: "GROSS_BEFORE_DISCOUNT",
+      commission_terms: { source: "operations-e2e", version: 1 },
+      expenses: Object.fromEntries(["shipping", "packaging", "other"].map((category) => [
+        category,
+        { state: "UNKNOWN", provenance: { source: "operations-e2e", category } },
+      ])),
+      items: [{
+        product_id: product.id,
+        product_name: "Operations Dirsek",
+        quantity: 1,
+        price: 100,
+        weight: 0.1273,
+        unit_gross_minor: 10_000,
+        vat_rate_bps: 2_000,
+      }],
     },
   });
   assert.ok(sale.payload.id);
