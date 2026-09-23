@@ -18,8 +18,8 @@ test("V2-14 source set declares exact immutable O/P/W/K/L revisions", () => {
   assert.equal(manifest.release, "V2-14");
   const byId = new Map(manifest.repositories.map((entry) => [entry.id, entry]));
   assert.deepEqual(Object.fromEntries(["O", "P", "W", "K", "L"].map((id) => [id, byId.get(id).revision])), {
-    O: "b5ed2a30fa00ad0c11566aa66bad38583866ece0",
-    P: "ca5e4ecf0f23620846ce7a86862bfbc46bb628db",
+    O: "82f8826bee82cf60c1cecc8a8b3ec373bc3b5562",
+    P: "65717fcb15f073a138efe839fd0941af28483d75",
     W: "c786eb1f4f555b4df72324ccda92da06ca62c56d",
     K: "0e0717c3f8d3f3f0af186b4c165524bc2e81724c",
     L: "add3987e0eb15e8742ecac490b5eb4e78b620ce5",
@@ -61,4 +61,3 @@ test("V2-14 verifier rejects the historical V2-13 manifest", () => {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Unsupported source-set release: expected V2-14/);
 });
-
