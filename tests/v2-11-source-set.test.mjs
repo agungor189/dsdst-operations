@@ -18,10 +18,10 @@ test("V2-11 source set declares exact immutable O/P/W/K/L revisions", () => {
   assert.equal(manifest.release, "V2-11");
   const byId = new Map(manifest.repositories.map((entry) => [entry.id, entry]));
   assert.deepEqual(Object.fromEntries(["O", "P", "W", "K", "L"].map((id) => [id, byId.get(id).revision])), {
-    O: "86752dda1068b340b03ea8e61767dfd83f52341a",
-    P: "ebd78bb2ddc0cb97bbb3df72b51ac685dc13cbe6",
+    O: "53e2c8abdaa13c29f8ef1dbc6dd377cbe8a7f162",
+    P: "477d83cb097aa6a980d2565bddfb49de6c33ec54",
     W: "ec141480145bb8159570f8e6ed1c387de4fa08e3",
-    K: "67325952cace8224b646c0a29d9464557a81c263",
+    K: "0e0717c3f8d3f3f0af186b4c165524bc2e81724c",
     L: "c57d9df0f412dae2c022093f0d7ac8591754edec",
   });
   for (const id of ["O", "P", "W", "K", "L"]) assert.match(byId.get(id).revision, /^[a-f0-9]{40}$/);
