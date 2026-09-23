@@ -42,6 +42,7 @@ A source of truth is the authoritative record plus the only accepted command pat
 4. UI-computed totals are display aids unless returned by an authoritative query contract.
 5. K `panel_connector_cache`, W browser state, L `products`, marketplace listing state, reports and CSV exports are non-authoritative.
 6. `products.central_stock`, current purchase cost and current sale price become controlled projections only after the new ledgers/policies are accepted; migration must preserve old values for reconciliation.
+7. Under ADR-0009, only an explicitly registered disposable projection may be rebuilt automatically from its canonical source with before/after audit evidence. Canonical records are never auto-repaired.
 
 ## Historical truth
 

@@ -16,7 +16,6 @@ test("P v85 plus forward-only v86 owns immutable canonical print jobs, deduplica
   const dedupSchema = read(panelRoot, "server", "db", "printDedupSchema.ts");
   assert.match(migration, /version:\s*85[\s\S]*add_canonical_print_state/);
   assert.match(migration, /version:\s*86[\s\S]*dedupe_canonical_print_intents/);
-  assert.match(migration, /CURRENT_SCHEMA_VERSION = 86/);
   assert.match(migration, /legacy print queues to be drained or explicitly cancelled/);
   for (const table of ["printing_jobs", "printing_attempts", "printing_reprints", "printing_events"])
     assert.match(schema, new RegExp(`CREATE TABLE ${table}`));

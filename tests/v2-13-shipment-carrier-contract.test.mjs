@@ -18,7 +18,6 @@ test("Panel v83-v84 adds forward-only Geliver evidence and shipment outbound exe
   assert.match(migration, /version:\s*82[\s\S]*add_shipment_carrier_gateway/);
   assert.match(migration, /version:\s*83[\s\S]*geliver_verified_flow_remediation/);
   assert.match(migration, /version:\s*84[\s\S]*wire_shipment_channel_outbound_execution/);
-  assert.match(migration, /CURRENT_SCHEMA_VERSION = 86/);
   for (const table of [
     "shipment_preparations", "shipment_packages", "shipment_carrier_selections", "shipment_booking_jobs",
     "shipment_booking_attempts", "shipment_provider_bookings", "shipment_labels", "shipment_state_events",

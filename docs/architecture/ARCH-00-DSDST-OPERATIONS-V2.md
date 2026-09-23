@@ -323,7 +323,7 @@ Read-only reconciliation compares:
 - print jobs against attempts;
 - backup manifest content against the deployed release.
 
-Reconciliation reports differences; they never auto-repair.
+Reconciliation reports canonical differences and never auto-repairs source-of-truth facts. ADR-0009 permits only explicitly registered, deterministically rebuildable disposable projections to be auto-repaired with append-only evidence.
 
 ## 20. Evolution stages
 
