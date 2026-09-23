@@ -12,6 +12,7 @@ const baseEnv = {
   E2E_KIT_STUDIO_API_KEY: "test-kit",
   E2E_LABEL_PRINTER_API_KEY: "test-label",
   E2E_CUSTOMER_HUB_API_KEY: "test-hub",
+  CUSTOMER_HUB_BACKUP_DIR: "customer_hub_backups",
   RESTORE_ROOT: "/tmp/dsdst-v218-compose-restore",
   RELEASE_CANDIDATE_PROJECT: "dsdst-candidate-v218-compose",
   CANDIDATE_PANEL_PORT: "41000",
@@ -52,4 +53,3 @@ test("merged E2E, recovery, and candidate Compose topology cannot inherit uninte
   assert.deepEqual(candidatePorts.map(({ published: port }) => Number(port)).sort((a, b) => a - b), [41000, 41001, 41002, 41003, 41004]);
   assert.equal(candidate.networks.internal.internal, true);
 });
-

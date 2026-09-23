@@ -89,3 +89,6 @@ networks:
   internal:
     name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}-internal
     internal: true
+
+volumes:
+  customer_hub_backups:
