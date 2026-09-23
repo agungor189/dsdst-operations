@@ -28,7 +28,7 @@ test("V2-18 CI and E2E are locked to the V2-18 exact source set", () => {
 
   for (const script of ["scripts/e2e.sh", "scripts/e2e-local.sh"]) {
     const source = fs.readFileSync(path.join(root, script), "utf8");
-    assert.match(source, /EXPECTED_SOURCE_SET_RELEASE=V2-18/);
+    assert.match(source, /EXPECTED_SOURCE_SET_RELEASE=\$\{EXPECTED_SOURCE_SET_RELEASE:-V2-18\}/);
     assert.match(source, /config\/v2-18-source-set\.json/);
   }
 

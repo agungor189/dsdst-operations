@@ -48,7 +48,8 @@ test("gateway accepts marketplace orders only through canonical sales, inventory
   assert.match(gateway, /PRICE_VARIANCE/);
   assert.match(gateway, /calculateInverseCommissionPrice/);
   assert.match(gateway, /BigInt\(target\) \* BigInt\(denominator\)/);
-  assert.match(gateway, /Math\.max\(0, availability\.availableBaseInt - buffer\)/);
+  assert.match(gateway, /Math\.max\(0, availability\.publishableBaseInt - buffer\)/);
+  assert.match(gateway, /publicationBlockedReason: availability\.blockedReason/);
   assert.match(gateway, /redactProviderPayload/);
   assert.match(gateway, /PLAINTEXT_SECRET_FORBIDDEN/);
   assert.match(sales, /SalesFinancialService/);

@@ -10,19 +10,20 @@ import { fileURLToPath } from "node:url";
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "config", "v2-06-source-set.json"), "utf8"));
 
-test("V2-06 workflow cannot silently keep accepting the old V2-05 source set", () => {
+test("current workflow cannot silently regress to the V2-05 or V2-06 source set", () => {
   const workflow = fs.readFileSync(path.join(root, ".github", "workflows", "e2e.yml"), "utf8");
   assert.equal(fs.existsSync(path.join(root, "config", "v2-06-source-set.json")), true, "V2-06 needs its own immutable source-set manifest");
   assert.doesNotMatch(workflow, /9b02cf736316800e7d2b5341a4d7cd8e13bb6c88/);
   assert.doesNotMatch(workflow, /c49f2706e5f69b555ef526e7a4fe7d018656008a/);
   assert.doesNotMatch(workflow, /82aaaf5575e88bc347b4b2d28f81aa59490ccad0/);
-  assert.match(workflow, /config\/v2-06-source-set\.json/);
+  assert.doesNotMatch(workflow, /config\/v2-06-source-set\.json/);
+  assert.match(workflow, /config\/v2-18-source-set\.json/);
 });
 
 test("V2-06 verifier rejects the immutable V2-05 manifest even when explicitly selected", () => {
   const result = spawnSync(process.execPath, [path.join(root, "scripts", "verify-source-set.mjs"), "--allow-dirty"], {
     encoding: "utf8",
-    env: { ...process.env, SOURCE_SET_MANIFEST: path.join(root, "config", "v2-05-source-set.json") },
+    env: { ...process.env, EXPECTED_SOURCE_SET_RELEASE: "V2-06", SOURCE_SET_MANIFEST: path.join(root, "config", "v2-05-source-set.json") },
   });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Unsupported source-set release: expected V2-06/);
@@ -61,6 +62,7 @@ test("source-set verifier rejects self-resolved Operations revisions", () => {
       encoding: "utf8",
       env: {
         ...process.env,
+        EXPECTED_SOURCE_SET_RELEASE: "V2-06",
         SOURCE_SET_MANIFEST: manifestPath,
         O_TEST_CONTEXT: root,
         P_TEST_CONTEXT: root,
@@ -76,10 +78,11 @@ test("source-set verifier rejects self-resolved Operations revisions", () => {
   }
 });
 
-test("E2E workflow checkout refs exactly match the source-set lock", () => {
-  const workflow = fs.readFileSync(path.join(root, ".github", "workflows", "e2e.yml"), "utf8");
+test("archived V2-06 source-set output remains exact", () => {
+  const result = spawnSync(process.execPath, [path.join(root, "scripts", "source-set-workflow-outputs.mjs"), path.join(root, "config", "v2-06-source-set.json"), "V2-06"], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
   for (const entry of manifest.repositories) {
-    assert.match(workflow, new RegExp(`repository: ${entry.repository.replace("/", "\\/")}\\n\\s+ref: ${entry.revision}`));
+    assert.match(result.stdout, new RegExp(`^${entry.id}=${entry.revision}$`, "m"));
   }
 });
 
@@ -97,6 +100,7 @@ test("source-set verifier fails closed on a wrong SHA and a missing repository",
     writeFileSync(manifestPath, JSON.stringify({ schemaVersion: "dsdst.test-source-set.v1", release: "V2-06", repositories: entries }));
     const commonEnv = {
       ...process.env,
+      EXPECTED_SOURCE_SET_RELEASE: "V2-06",
       SOURCE_SET_MANIFEST: manifestPath,
       O_TEST_CONTEXT: root,
       P_TEST_CONTEXT: root,
