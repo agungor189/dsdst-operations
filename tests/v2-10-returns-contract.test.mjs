@@ -11,12 +11,15 @@ const read = (base, ...segments) => fs.readFileSync(path.join(base, ...segments)
 
 test("Panel owns append-only V2-10 return, receipt, loss, refund, and settlement facts", () => {
   const schema = read(panelRoot, "server", "db", "returnsSchema.ts");
+  const packageOriginSchema = read(panelRoot, "server", "db", "warehousePackageOriginSchema.ts");
   const migration = read(panelRoot, "server", "migrations", "runner.ts");
   const service = read(panelRoot, "server", "modules", "returns", "returnsService.ts");
+  const warehouse = read(panelRoot, "server", "modules", "warehouse", "warehouseExecutionService.ts");
   const routes = read(panelRoot, "server", "routes", "returnsV1Routes.ts");
   const warehouseRoutes = read(panelRoot, "server", "routes", "warehouseRoutes.ts");
 
   assert.match(migration, /version:\s*75[\s\S]*add_returns_refunds_financial_reversals/);
+  assert.match(migration, /version:\s*76[\s\S]*generalize_warehouse_package_return_origin/);
   for (const table of [
     "return_requests", "return_request_lines", "return_financial_reversal_allocations", "return_cogs_reversal_allocations",
     "return_receipts", "return_receipt_lines", "return_receipt_inventory_allocations", "return_loss_facts",
@@ -40,6 +43,15 @@ test("Panel owns append-only V2-10 return, receipt, loss, refund, and settlement
   assert.match(service, /acquisition_cost_snapshot_id/);
   assert.match(service, /MARKETPLACE_REFUND_CASH_FORBIDDEN/);
   assert.match(service, /source_type,source_id[\s\S]*v2_return_refund_projection/);
+  assert.match(service, /warehouse\.registerReturnPackage/);
+  assert.doesNotMatch(service, /INSERT INTO inventory_lot_location_balances/);
+  assert.match(packageOriginSchema, /origin_type[\s\S]*GOODS_RECEIPT[\s\S]*RETURN_RECEIPT/);
+  assert.match(packageOriginSchema, /return_receipt_inventory_allocation_id\s+TEXT UNIQUE/);
+  assert.match(packageOriginSchema, /origin_inventory_lot_id/);
+  assert.match(warehouse, /registerReturnPackage/);
+  assert.match(warehouse, /validatedDestination\(packageId/);
+  assert.match(warehouse, /validatedQuarantineDestination\(packageId/);
+  assert.match(warehouse, /packageId, packageCode, "RETURN_RECEIPT"/);
   assert.doesNotMatch(service, /category\s*=\s*["']ADVERTISING|purchase_cost\s*\*/i);
 });
 
