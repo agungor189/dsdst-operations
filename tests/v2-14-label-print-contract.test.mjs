@@ -10,11 +10,13 @@ const warehouseRoot = path.resolve(process.env.WAREHOUSE_CONTEXT || path.join(ro
 const labelRoot = path.resolve(process.env.LABEL_PRINTER_CONTEXT || path.join(root, "..", "label-printer"));
 const read = (base, ...segments) => fs.readFileSync(path.join(base, ...segments), "utf8");
 
-test("P v85 owns immutable canonical print jobs, attempts, reprints and uncertainty-aware state", () => {
+test("P v85 plus forward-only v86 owns immutable canonical print jobs, deduplication and uncertainty-aware state", () => {
   const migration = read(panelRoot, "server", "migrations", "runner.ts");
   const schema = read(panelRoot, "server", "db", "printStateSchema.ts");
+  const dedupSchema = read(panelRoot, "server", "db", "printDedupSchema.ts");
   assert.match(migration, /version:\s*85[\s\S]*add_canonical_print_state/);
-  assert.match(migration, /CURRENT_SCHEMA_VERSION = 85/);
+  assert.match(migration, /version:\s*86[\s\S]*dedupe_canonical_print_intents/);
+  assert.match(migration, /CURRENT_SCHEMA_VERSION = 86/);
   assert.match(migration, /legacy print queues to be drained or explicitly cancelled/);
   for (const table of ["printing_jobs", "printing_attempts", "printing_reprints", "printing_events"])
     assert.match(schema, new RegExp(`CREATE TABLE ${table}`));
@@ -25,6 +27,10 @@ test("P v85 owns immutable canonical print jobs, attempts, reprints and uncertai
   assert.match(schema, /Xprinter XP-470B/);
   assert.match(schema, /printer_dpi INTEGER NOT NULL DEFAULT 203/);
   assert.doesNotMatch(schema, /'KIT'/);
+  assert.match(dedupSchema, /printable_snapshot_hash/);
+  assert.match(dedupSchema, /reprint_dedupe_hash/);
+  assert.match(dedupSchema, /idx_printing_jobs_original_snapshot_unique/);
+  assert.match(dedupSchema, /idx_printing_jobs_active_reprint_unique/);
 });
 
 test("P snapshots exact L versions and label payloads while SHIPPING preserves the native artifact", () => {
@@ -59,6 +65,26 @@ test("reprints require permission, controlled reason and immutable linkage to th
   assert.match(routes, /admin\/print-jobs\/:id\/reprint[\s\S]*warehouse:print_labels/);
   assert.match(routes, /admin\/print-jobs\/:id\/confirm[\s\S]*warehouse:print_labels/);
   assert.match(routes, /printing\.job\.reprint\.v1/);
+});
+
+test("P converges fresh client UUIDs by immutable snapshot without collapsing changed snapshots", () => {
+  const service = read(panelRoot, "server", "modules", "printing", "printingService.ts");
+  const tests = read(panelRoot, "server", "modules", "printing", "printingService.test.ts");
+  const routes = read(panelRoot, "server", "routes", "warehouseRoutes.ts");
+  assert.match(service, /printableSnapshotHash/);
+  assert.match(service, /payloadSnapshotHash/);
+  assert.match(service, /reprintDedupeHash/);
+  assert.match(service, /ACTIVE_REPRINT_STATUSES/);
+  assert.match(service, /original_job_id IS NULL AND printable_snapshot_hash=/);
+  assert.match(service, /logical_replay:\s*true/);
+  assert.match(routes, /if \(!data\.logical_replay\) context\.addOutbox/);
+  for (const requirement of [
+    "repeated package Yazdır",
+    "repeated location Yazdır",
+    "repeated shipping-label Yazdır",
+    "reprint double-click",
+    "changed payload, template version, or provider artifact hash",
+  ]) assert.match(tests, new RegExp(requirement));
 });
 
 test("L is the only editable template authority with CAS-safe immutable versions and locked media contracts", () => {
