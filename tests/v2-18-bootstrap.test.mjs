@@ -219,3 +219,90 @@ test('bootstrap orchestration uses online SQLite backup and preserves normal V2-
   assert.match(recoveryScript,/restore-drill\.sh" --full/);
   assert.doesNotMatch(recoveryScript,/cloudflare-route|cutover/);
 });
+
+test('bootstrap seeds isolated Kit, Label and Hub service principals without changing Warehouse authority', () => {
+  const root = new URL('..', import.meta.url).pathname;
+  const dbPath = path.join(temp(), 'panel-service-keys.sqlite');
+
+  const db = new DatabaseSync(dbPath);
+  db.exec(`
+    CREATE TABLE panel_api_keys (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      key_prefix TEXT,
+      key_hash TEXT UNIQUE,
+      last4 TEXT,
+      status TEXT,
+      environment TEXT,
+      permissions TEXT,
+      allowed_ips TEXT,
+      expires_at TEXT,
+      updated_at TEXT,
+      deleted_at TEXT,
+      revoked_at TEXT
+    );
+  `);
+
+  db.prepare(`
+    INSERT INTO panel_api_keys
+      (id,name,key_prefix,key_hash,last4,status,environment,permissions)
+    VALUES
+      ('warehouse-production','Warehouse Production','warehouse','existing-hash','0001','active','live','["read:warehouse_orders"]')
+  `).run();
+
+  db.close();
+
+  execFileSync(process.execPath, [
+    path.join(root, 'scripts/bootstrap-seed-service-keys.mjs'),
+    dbPath,
+  ], {
+    env: {
+      ...process.env,
+      PANEL_API_HASH_SECRET: 'x'.repeat(64),
+      WAREHOUSE_API_KEY: 'warehouse-existing-key',
+      KIT_STUDIO_API_KEY: 'bootstrap-kit-key',
+      LABEL_PRINTER_API_KEY: 'bootstrap-label-key',
+      CUSTOMER_HUB_API_KEY: 'bootstrap-hub-key',
+    },
+  });
+
+  const verify = new DatabaseSync(dbPath, {readOnly:true});
+
+  const rows = verify.prepare(`
+    SELECT id,name,status,environment,permissions
+    FROM panel_api_keys
+    ORDER BY id
+  `).all();
+
+  verify.close();
+
+  assert.equal(rows.length, 4);
+
+  const warehouse = rows.find((row) => row.id === 'warehouse-production');
+  assert.equal(warehouse.name, 'Warehouse Production');
+  assert.equal(warehouse.environment, 'live');
+
+  const kit = rows.find((row) => row.id === 'bootstrap-v2-18-kit');
+  const label = rows.find((row) => row.id === 'bootstrap-v2-18-label');
+  const hub = rows.find((row) => row.id === 'bootstrap-v2-18-customer-hub');
+
+  assert.ok(kit && label && hub);
+
+  assert.deepEqual(JSON.parse(kit.permissions), [
+    'auth:login',
+    'auth:session:validate',
+    'auth:session:revoke',
+    'auth:password:change',
+    'kit-catalog:read',
+    'catalog:read',
+  ]);
+
+  for (const principal of [label, hub]) {
+    assert.deepEqual(JSON.parse(principal.permissions), [
+      'auth:login',
+      'auth:session:validate',
+      'auth:session:revoke',
+      'auth:password:change',
+    ]);
+  }
+});
