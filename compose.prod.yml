@@ -143,6 +143,7 @@ services:
       PORT: 3100
       APP_ORIGIN: ${CUSTOMER_HUB_APP_ORIGIN:?CUSTOMER_HUB_APP_ORIGIN is required}
       PANEL_BASE_URL: http://dsdst-panel:3000
+      PANEL_API_KEY: ${CUSTOMER_HUB_API_KEY:?CUSTOMER_HUB_API_KEY is required}
       DATABASE_PATH: /data/customer-hub.db
       ATTACHMENTS_DIR: /data/attachments
       BACKUP_DIR: /backups

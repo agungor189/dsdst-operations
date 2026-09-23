@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const expectedRelease = process.env.EXPECTED_SOURCE_SET_RELEASE || "V2-06";
+const expectedRelease = process.env.EXPECTED_SOURCE_SET_RELEASE || "V2-18";
 const defaultManifest = `${expectedRelease.toLowerCase()}-source-set.json`;
 const manifestPath = path.resolve(process.env.SOURCE_SET_MANIFEST || path.join(root, "config", defaultManifest));
 const allowDirty = process.argv.includes("--allow-dirty");

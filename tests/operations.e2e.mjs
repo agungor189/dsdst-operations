@@ -165,7 +165,9 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
   });
   assert.equal(sentReply.assigned_user_id, customerHubLogin.payload.user.id);
   assert.ok(sentReply.tags.some((tag) => tag.id === hubTags.payload.items[0].id));
-    assert.ok(sentReply.notes.some((note) => note.text === `Internal note ${hubMarker}`));
+  assert.ok(sentReply.notes.some((note) => note.text === `Internal note ${hubMarker}`));
+  await request(customerHubUrl, "/api/auth/logout", { method: "POST", cookie: customerHubCookie, expect: 204 });
+  await request(customerHubUrl, "/api/auth/me", { cookie: customerHubCookie, expect: 401 });
   }
 
   const labelLogin = await request(labelPrinterUrl, "/api/auth/login", {

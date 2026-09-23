@@ -2,7 +2,7 @@ services:
   dsdst-panel:
     build: !reset null
     image: ${PANEL_IMAGE:?PANEL_IMAGE immutable digest is required}
-    ports:
+    ports: !override
       - "127.0.0.1:${CANDIDATE_PANEL_PORT:?CANDIDATE_PANEL_PORT is required}:3000"
     volumes:
       - candidate_panel_data:/data
@@ -12,13 +12,13 @@ services:
   dsdst-warehouse:
     build: !reset null
     image: ${WAREHOUSE_IMAGE:?WAREHOUSE_IMAGE immutable digest is required}
-    ports:
+    ports: !override
       - "127.0.0.1:${CANDIDATE_WAREHOUSE_PORT:?CANDIDATE_WAREHOUSE_PORT is required}:3006"
 
   dsdst-kit-studio:
     build: !reset null
     image: ${KIT_STUDIO_IMAGE:?KIT_STUDIO_IMAGE immutable digest is required}
-    ports:
+    ports: !override
       - "127.0.0.1:${CANDIDATE_KIT_STUDIO_PORT:?CANDIDATE_KIT_STUDIO_PORT is required}:3012"
     volumes:
       - candidate_kit_data:/data
@@ -27,7 +27,7 @@ services:
   dsdst-customer-hub:
     build: !reset null
     image: ${CUSTOMER_HUB_IMAGE:?CUSTOMER_HUB_IMAGE immutable digest is required}
-    ports:
+    ports: !override
       - "127.0.0.1:${CANDIDATE_CUSTOMER_HUB_PORT:?CANDIDATE_CUSTOMER_HUB_PORT is required}:3100"
     volumes:
       - candidate_customer_hub_data:/data
@@ -36,7 +36,7 @@ services:
   label-printer:
     build: !reset null
     image: ${LABEL_PRINTER_IMAGE:?LABEL_PRINTER_IMAGE immutable digest is required}
-    ports:
+    ports: !override
       - "127.0.0.1:${CANDIDATE_LABEL_PRINTER_PORT:?CANDIDATE_LABEL_PRINTER_PORT is required}:3000"
     volumes:
       - candidate_label_data:/app/data

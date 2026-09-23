@@ -8,9 +8,12 @@ WAREHOUSE_REPO=${WAREHOUSE_CONTEXT:-$ROOT_DIR/../Dsdst-Warehouse}
 KIT_REPO=${KIT_STUDIO_CONTEXT:-$ROOT_DIR/../dsdst-kit-studio}
 LABEL_REPO=${LABEL_PRINTER_CONTEXT:-$ROOT_DIR/../Label-Printer}
 CUSTOMER_HUB_REPO=${CUSTOMER_HUB_CONTEXT:-$ROOT_DIR/../dsdst-customer-hub}
+EXPECTED_SOURCE_SET_RELEASE=${EXPECTED_SOURCE_SET_RELEASE:-V2-18}
+SOURCE_SET_MANIFEST=${SOURCE_SET_MANIFEST:-$ROOT_DIR/config/v2-18-source-set.json}
 OPERATIONS_CONTEXT="$OPERATIONS_REPO" PANEL_CONTEXT="$PANEL_REPO" WAREHOUSE_CONTEXT="$WAREHOUSE_REPO" \
   KIT_STUDIO_CONTEXT="$KIT_REPO" LABEL_PRINTER_CONTEXT="$LABEL_REPO" CUSTOMER_HUB_CONTEXT="$CUSTOMER_HUB_REPO" \
-  node "$ROOT_DIR/scripts/verify-source-set.mjs"
+  EXPECTED_SOURCE_SET_RELEASE="$EXPECTED_SOURCE_SET_RELEASE" SOURCE_SET_MANIFEST="$SOURCE_SET_MANIFEST" \
+  node "$ROOT_DIR/scripts/verify-source-set.mjs" --allow-operations-descendant
 RUNTIME_DIR=$(mktemp -d "${TMPDIR:-/tmp}/dsdst-e2e.XXXXXX")
 PROJECT_NAME="dsdst-e2e-$$"
 ENV_FILE="$RUNTIME_DIR/e2e.env"
@@ -37,8 +40,10 @@ E2E_WAREHOUSE_API_KEY=operations-e2e-api-key-not-production
 WAREHOUSE_API_KEY=operations-e2e-api-key-not-production
 E2E_KIT_STUDIO_API_KEY=operations-e2e-kit-api-key-not-production
 E2E_LABEL_PRINTER_API_KEY=operations-e2e-label-api-key-not-production
+E2E_CUSTOMER_HUB_API_KEY=operations-e2e-customer-hub-api-key-not-production
 KIT_STUDIO_API_KEY=operations-e2e-kit-api-key-not-production
 LABEL_PRINTER_API_KEY=operations-e2e-label-api-key-not-production
+CUSTOMER_HUB_API_KEY=operations-e2e-customer-hub-api-key-not-production
 LABEL_RENDERER_API_KEY=operations-e2e-renderer-key-not-production
 CUSTOMER_HUB_ENCRYPTION_KEY=0707070707070707070707070707070707070707070707070707070707070707
 CUSTOMER_HUB_APP_ORIGIN=http://dsdst-customer-hub:3100

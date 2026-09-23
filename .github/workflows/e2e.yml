@@ -15,36 +15,40 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: source-set-control
+      - name: Read V2-18 exact source set
+        id: source-set
+        working-directory: source-set-control
+        run: node scripts/source-set-workflow-outputs.mjs config/v2-18-source-set.json V2-18 >> "$GITHUB_OUTPUT"
       - name: Checkout exact Operations source
         uses: actions/checkout@v4
         with:
           repository: agungor189/dsdst-operations
-          ref: 2fb0d75b2f035135f976a1c2f61253351904a79f
+          ref: ${{ steps.source-set.outputs.O }}
           path: dsdst-operations
       - uses: actions/checkout@v4
         with:
           repository: agungor189/panel-kit-yonetimi
-          ref: 8d58cbc27cfb5e0b878e8b4e072c021edc17a62a
+          ref: ${{ steps.source-set.outputs.P }}
           path: panel-kit-yonetimi
       - uses: actions/checkout@v4
         with:
           repository: agungor189/Dsdst-Warehouse
-          ref: a00be0e89cd4871942b7a8eb51e90fe265e7e031
+          ref: ${{ steps.source-set.outputs.W }}
           path: Dsdst-Warehouse
       - uses: actions/checkout@v4
         with:
           repository: agungor189/dsdst-kit-studio
-          ref: 2337bd4d86c47e143d3cabaf830a869932bb0968
+          ref: ${{ steps.source-set.outputs.K }}
           path: dsdst-kit-studio
       - uses: actions/checkout@v4
         with:
           repository: agungor189/Label-Printer
-          ref: c57d9df0f412dae2c022093f0d7ac8591754edec
+          ref: ${{ steps.source-set.outputs.L }}
           path: Label-Printer
       - uses: actions/checkout@v4
         with:
           repository: agungor189/dsdst-customer-hub
-          ref: f030c29b6ee41765289993fda1e94d1e484b5cac
+          ref: ${{ steps.source-set.outputs.HUB }}
           path: dsdst-customer-hub
       - name: Verify exact source set
         working-directory: source-set-control
@@ -55,9 +59,12 @@ jobs:
           KIT_STUDIO_CONTEXT: ../dsdst-kit-studio
           LABEL_PRINTER_CONTEXT: ../Label-Printer
           CUSTOMER_HUB_CONTEXT: ../dsdst-customer-hub
+          EXPECTED_SOURCE_SET_RELEASE: V2-18
+          SOURCE_SET_MANIFEST: config/v2-18-source-set.json
         run: node scripts/verify-source-set.mjs
       - name: Run isolated system workflow
         working-directory: dsdst-operations
         env:
-          SOURCE_SET_MANIFEST: ../source-set-control/config/v2-06-source-set.json
+          EXPECTED_SOURCE_SET_RELEASE: V2-18
+          SOURCE_SET_MANIFEST: ../source-set-control/config/v2-18-source-set.json
         run: ./scripts/e2e.sh

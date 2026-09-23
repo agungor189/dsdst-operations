@@ -8,9 +8,12 @@ WAREHOUSE_REPO=${WAREHOUSE_CONTEXT:-$ROOT_DIR/../Dsdst-Warehouse}
 KIT_REPO=${KIT_STUDIO_CONTEXT:-$ROOT_DIR/../dsdst-kit-studio}
 LABEL_REPO=${LABEL_PRINTER_CONTEXT:-$ROOT_DIR/../Label-Printer}
 CUSTOMER_HUB_REPO=${CUSTOMER_HUB_CONTEXT:-$ROOT_DIR/../dsdst-customer-hub}
+EXPECTED_SOURCE_SET_RELEASE=${EXPECTED_SOURCE_SET_RELEASE:-V2-18}
+SOURCE_SET_MANIFEST=${SOURCE_SET_MANIFEST:-$ROOT_DIR/config/v2-18-source-set.json}
 OPERATIONS_CONTEXT="$OPERATIONS_REPO" PANEL_CONTEXT="$PANEL_REPO" WAREHOUSE_CONTEXT="$WAREHOUSE_REPO" \
   KIT_STUDIO_CONTEXT="$KIT_REPO" LABEL_PRINTER_CONTEXT="$LABEL_REPO" CUSTOMER_HUB_CONTEXT="$CUSTOMER_HUB_REPO" \
-  node "$ROOT_DIR/scripts/verify-source-set.mjs"
+  EXPECTED_SOURCE_SET_RELEASE="$EXPECTED_SOURCE_SET_RELEASE" SOURCE_SET_MANIFEST="$SOURCE_SET_MANIFEST" \
+  node "$ROOT_DIR/scripts/verify-source-set.mjs" --allow-operations-descendant
 RUNTIME_DIR=$(mktemp -d "${TMPDIR:-/tmp}/dsdst-e2e-local.XXXXXX")
 NODE24_BIN=${NODE24_BIN:-$(npx -y node@24 -p 'process.execPath')}
 KIT_NODE_BIN=${KIT_NODE_BIN:-$(command -v node)}
@@ -26,6 +29,7 @@ CUSTOMER_HUB_PORT=$((BASE_PORT + 5))
 API_KEY=operations-e2e-api-key-not-production
 KIT_API_KEY=operations-e2e-kit-api-key-not-production
 LABEL_API_KEY=operations-e2e-label-api-key-not-production
+CUSTOMER_HUB_API_KEY=operations-e2e-customer-hub-api-key-not-production
 RENDERER_KEY=operations-e2e-renderer-key-not-production
 PIDS=""
 
@@ -65,6 +69,7 @@ fi
 (cd "$PANEL_REPO" && exec env \
   NODE_ENV=test E2E_ALLOW_SEED=true DB_PATH="$RUNTIME_DIR/panel.db" \
   E2E_WAREHOUSE_API_KEY="$API_KEY" E2E_KIT_STUDIO_API_KEY="$KIT_API_KEY" E2E_LABEL_PRINTER_API_KEY="$LABEL_API_KEY" \
+  E2E_CUSTOMER_HUB_API_KEY="$CUSTOMER_HUB_API_KEY" \
   PANEL_API_HASH_SECRET=operations-e2e-hash-secret-not-production \
   JWT_SECRET=operations-e2e-jwt-secret-not-production \
   ENCRYPTION_SECRET=operations-e2e-encryption-not-production \
@@ -91,6 +96,7 @@ if [ "$E2E_SKIP_AUXILIARY_HUB" != "1" ]; then
   (cd "$CUSTOMER_HUB_REPO" && exec env NODE_ENV=test PORT="$CUSTOMER_HUB_PORT" \
     DATABASE_PATH="$RUNTIME_DIR/customer-hub-data/customer-hub.db" ATTACHMENTS_DIR="$RUNTIME_DIR/customer-hub-data/attachments" \
     PANEL_BASE_URL="http://127.0.0.1:$PANEL_PORT" APP_ORIGIN="http://127.0.0.1:$CUSTOMER_HUB_PORT" \
+    PANEL_API_KEY="$CUSTOMER_HUB_API_KEY" \
     CUSTOMER_HUB_ENCRYPTION_KEY=0707070707070707070707070707070707070707070707070707070707070707 \
     SESSION_SECURE=false MOCK_ADAPTERS_ENABLED=true \
     "$CUSTOMER_HUB_NODE_BIN" dist-server/server/index.js) >"$RUNTIME_DIR/customer-hub.log" 2>&1 &

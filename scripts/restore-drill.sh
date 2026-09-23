@@ -106,6 +106,7 @@ mkdir -p "$TARGET/scratch/panel-backups" "$TARGET/scratch/customer-hub-backups"
 IMAGE_ENV="$TARGET/recovery-images.env"
 node --no-warnings "$ROOT_DIR/scripts/recovery/recovery-cli.mjs" image-env "$RECOVERY_POINT" > "$IMAGE_ENV"
 set -a
+# shellcheck source=/dev/null
 . "$IMAGE_ENV"
 set +a
 export COMPOSE_PROJECT_NAME="$PROJECT" RESTORE_ROOT="$TARGET"

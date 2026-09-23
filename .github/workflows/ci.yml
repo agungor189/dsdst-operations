@@ -21,6 +21,8 @@ jobs:
           npm ci --ignore-scripts
           node scripts/validate-release-evidence.mjs evidence/release-evidence.redacted.json
           node --test tests/release-evidence.test.mjs
+      - name: Architecture and orchestration regression gates
+        run: npm test
       - name: Shell syntax
         run: |
           shellcheck scripts/*.sh
@@ -28,6 +30,9 @@ jobs:
       - name: Compose syntax
         env:
           E2E_WAREHOUSE_API_KEY: ci-compose-validation-key
+          E2E_KIT_STUDIO_API_KEY: ci-compose-validation-key
+          E2E_LABEL_PRINTER_API_KEY: ci-compose-validation-key
+          E2E_CUSTOMER_HUB_API_KEY: ci-compose-validation-key
         run: docker compose --env-file .env.example -f compose.prod.yml -f compose.e2e.yml config --quiet
       - uses: aquasecurity/trivy-action@v0.36.0
         with:
