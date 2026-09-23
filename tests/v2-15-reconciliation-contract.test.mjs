@@ -28,6 +28,12 @@ test("P performs deterministic dedupe, exact scoped blocks and safe projection-o
     assert.match(service, new RegExp(code));
   assert.match(service, /createHash\("sha256"\)/);
   assert.match(service, /occurrences=occurrences\+1/);
+  assert.match(service, /new Map\(collected\.map/);
+  assert.match(service, /profile_piece_reservations/);
+  assert.match(service, /kerf_total_mm/);
+  assert.match(service, /geliver_offer_selections/);
+  assert.match(service, /geliver_booking_facts/);
+  assert.match(service, /geliver_tracking_observations/);
   assert.match(service, /affectedType:"SKU"/);
   assert.match(service, /affectedType:"ORDER"/);
   assert.match(service, /kind:\s*"CENTRAL_STOCK"/);
@@ -40,9 +46,13 @@ test("daily 03:00 and manual Panel paths are authenticated, audited and admin-ga
   const routes = read(panel, "server", "routes", "reconciliationV1Routes.ts");
   const permissions = read(panel, "server", "modules", "auth", "permissions.ts");
   const ui = read(panel, "src", "components", "ReconciliationCenter.tsx");
-  assert.match(scheduler, /setHours\(3,0,0,0\)/);
+  assert.match(scheduler, /Europe\/Istanbul/);
+  assert.match(scheduler, /RECONCILIATION_TIME_ZONE/);
+  assert.match(scheduler, /hour:\s*3/);
   assert.match(routes, /reconciliation:run/);
   assert.match(routes, /data:repair:approve/);
+  assert.match(routes, /data:repair:apply/);
+  assert.match(routes, /repair-proposals\/:id\/execute/);
   assert.match(routes, /CommandExecutor/);
   assert.match(routes, /context\.addOutbox/);
   assert.match(permissions, /"data:repair:approve"/);
@@ -51,6 +61,24 @@ test("daily 03:00 and manual Panel paths are authenticated, audited and admin-ga
   assert.match(ui, /Gerçek/);
   assert.match(ui, /Onayla/);
   assert.match(ui, /Reddet/);
+  assert.match(ui, /Doğrula \/ Engeli kaldır/);
+  assert.match(ui, /Yetkili komutu uygula/);
+});
+
+test("critical scope guards and the bounded repair executor use domain services rather than generic SQL", () => {
+  const guard = read(panel, "server", "modules", "reconciliation", "reconciliationGuard.ts");
+  const repair = read(panel, "server", "modules", "reconciliation", "reconciliationRepairExecutor.ts");
+  const inventory = read(panel, "server", "modules", "inventory", "inventoryService.ts");
+  const shipping = read(panel, "server", "modules", "shipping", "shipmentService.ts");
+  const geliver = read(panel, "server", "modules", "shipping", "geliverFlowService.ts");
+  const returns = read(panel, "server", "modules", "returns", "returnsService.ts");
+  assert.match(guard, /affected_type=\?/);
+  for (const source of [inventory, shipping, geliver, returns]) assert.match(source, /ReconciliationScopeGuard/);
+  assert.match(repair, /REGISTERED_RECONCILIATION_REPAIR_COMMANDS/);
+  assert.match(repair, /inventory\.release-reservation\.v1/);
+  assert.match(repair, /new InventoryService/);
+  assert.match(repair, /markRepairApplied/);
+  assert.doesNotMatch(repair, /UPDATE\s+inventory_lots|DELETE\s+FROM/i);
 });
 
 test("W exposes only read-only inventory SKU findings and no repair mutation", () => {
