@@ -328,3 +328,17 @@ test('release candidate state volumes disable Docker image copy-up', () => {
     assert.match(block, /nocopy:\s*true/, `${source} must disable image copy-up`);
   }
 });
+
+test('bootstrap hydration runs with temporary root privilege and hands state back to runtime node ownership', () => {
+  const root = new URL('..', import.meta.url).pathname;
+  const candidate = fs.readFileSync(path.join(root, 'scripts/bootstrap-candidate.sh'), 'utf8');
+  const hydrate = fs.readFileSync(path.join(root, 'scripts/bootstrap-hydrate-volumes.sh'), 'utf8');
+
+  assert.match(candidate, /docker run --rm[\s\S]{0,120}--user 0:0/);
+  assert.match(candidate, /TARGET_UID=1000/);
+  assert.match(candidate, /TARGET_GID=1000/);
+
+  assert.match(hydrate, /TARGET_UID:\?TARGET_UID is required/);
+  assert.match(hydrate, /TARGET_GID:\?TARGET_GID is required/);
+  assert.match(hydrate, /chown -R "\$\{TARGET_UID\}:\$\{TARGET_GID\}"/);
+});

@@ -84,7 +84,10 @@ compose create --no-build
 node "$ROOT_DIR/scripts/bootstrap-cli.mjs" restore "$BOOTSTRAP_POINT" "$RESTORE_TARGET" >/dev/null
 
 docker run --rm \
+  --user 0:0 \
   --env-file "$ENV_FILE" \
+  -e TARGET_UID=1000 \
+  -e TARGET_GID=1000 \
   --mount "type=volume,src=${PROJECT}-panel-data,dst=/target/panel-data" \
   --mount "type=volume,src=${PROJECT}-panel-uploads,dst=/target/panel-uploads" \
   --mount "type=volume,src=${PROJECT}-kit-data,dst=/target/kit-data" \
