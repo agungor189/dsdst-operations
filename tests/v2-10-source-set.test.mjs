@@ -18,7 +18,7 @@ test("V2-10 source set declares exact immutable O/P/W/K/L revisions", () => {
   assert.equal(manifest.release, "V2-10");
   const byId = new Map(manifest.repositories.map((entry) => [entry.id, entry]));
   assert.deepEqual(Object.fromEntries(["O", "P", "W", "K", "L"].map((id) => [id, byId.get(id).revision])), {
-    O: "b8734f7c9b545a18480aa4ca139729a01135929e",
+    O: "cb068eb72522930f7808157667bde318920e279b",
     P: "e3b401759e36a5ce4df74a7853b7d63ef2126009",
     W: "ec141480145bb8159570f8e6ed1c387de4fa08e3",
     K: "2337bd4d86c47e143d3cabaf830a869932bb0968",
@@ -40,6 +40,7 @@ test("V2-10 records the accepted V2-09 Operations closure as its immutable prede
   for (const id of ["K", "L"]) assert.equal(currentById.get(id).revision, previousById.get(id).revision);
   assert.notEqual(currentById.get("P").revision, previousById.get("P").revision);
   assert.notEqual(currentById.get("W").revision, previousById.get("W").revision);
+  assert.notEqual(currentById.get("O").revision, manifest.basedOn.operationsClosureRevision);
 });
 
 test("source-set verifier accepts an explicitly selected V2-10 exact revision set", () => {
