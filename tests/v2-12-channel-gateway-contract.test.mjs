@@ -16,7 +16,7 @@ test("Panel v79-v81 owns the generic channel inbox, package identity, policy, cu
   assert.match(migration, /version:\s*79[\s\S]*add_channel_gateway/);
   assert.match(migration, /version:\s*80[\s\S]*remediate_channel_gateway_execution/);
   assert.match(migration, /version:\s*81[\s\S]*correct_channel_gateway_package_finance_versioning/);
-  assert.match(migration, /CURRENT_SCHEMA_VERSION = 84/);
+  assert.match(migration, /CURRENT_SCHEMA_VERSION = 85/);
   for (const table of [
     "channel_accounts", "channel_product_mappings", "channel_commission_terms", "channel_stock_buffers",
     "channel_inbound_events", "channel_orders", "channel_order_lines", "channel_price_variances",

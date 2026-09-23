@@ -10,7 +10,7 @@ const customerHubUrl = process.env.CUSTOMER_HUB_URL || "http://dsdst-customer-hu
 const warehouseServiceKey = process.env.WAREHOUSE_SERVICE_KEY || "";
 const includeCustomerHub = process.env.E2E_SKIP_AUXILIARY_HUB !== "1";
 
-const request = async (base, path, { method = "GET", body, token, cookie, apiKey, expect = 200 } = {}) => {
+const request = async (base, path, { method = "GET", body, token, cookie, apiKey, headers = {}, expect = 200 } = {}) => {
   const response = await fetch(`${base}${path}`, {
     method,
     headers: {
@@ -20,6 +20,7 @@ const request = async (base, path, { method = "GET", body, token, cookie, apiKey
       ...(cookie ? { Cookie: cookie } : {}),
       ...(!["GET", "HEAD"].includes(method) ? { Origin: base } : {}),
       ...(apiKey ? { "x-api-key": apiKey } : {}),
+      ...headers,
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
@@ -54,10 +55,10 @@ const template = (id, marker) => ({
   purpose: "goods_receipt",
   isDefault: true,
   width: 100,
-  height: 60,
+  height: 150,
   elements: [
     { id: "marker", type: "text", x: 4, y: 4, width: 92, height: 8, value: `${marker} {SKU}`, fontSize: 4, fontWeight: "bold" },
-    { id: "barcode", type: "barcode", x: 4, y: 18, width: 65, height: 26, value: "{Package_code}", showBarcodeText: true },
+    { id: "barcode", type: "barcode", x: 4, y: 18, width: 65, height: 26, value: "{SKU}", showBarcodeText: true },
     { id: "qr", type: "qr", x: 73, y: 18, width: 23, height: 23, value: "{Package_code}" },
   ],
 });
@@ -269,9 +270,10 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
 
   const currentState = await request(labelPrinterUrl, "/api/state", { cookie: labelCookie });
   const v1 = template("operations-goods-receipt-v1", "LIVE-V1");
-  await request(labelPrinterUrl, "/api/state", {
+  const stateV1 = await request(labelPrinterUrl, "/api/state", {
     method: "PUT",
     cookie: labelCookie,
+    headers: { "If-Match": String(currentState.payload.revision) },
     body: { ...currentState.payload, template: v1, templates: [v1] },
   });
   const previewBody = { purpose: "goods_receipt", data: { SKU: sku, Package_code: pkg.package_code, Paket_no: "1 / 2", Malzeme: "Alüminyum" } };
@@ -283,7 +285,8 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
   await request(labelPrinterUrl, "/api/state", {
     method: "PUT",
     cookie: labelCookie,
-    body: { ...currentState.payload, template: v2, templates: [v1, v2] },
+    headers: { "If-Match": String(stateV1.payload.revision) },
+    body: { ...stateV1.payload, template: v2, templates: [v1, v2] },
   });
   const previewV2 = await request(warehouseUrl, "/api/labels/preview", { method: "POST", cookie: warehouseCookie, body: previewBody });
   assert.equal(previewV2.response.headers.get("x-label-template-id"), v2.id);
@@ -293,11 +296,12 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
     method: "POST",
     cookie: warehouseCookie,
     body: { claim_token: pkg.claim_token, idempotency_key: `print-${pkg.id}`, device_id: "operations-e2e" },
+    expect: 201,
   });
-  const printJobId = queued.payload.data.job.id;
+  const printJobId = queued.payload.data.id;
   await waitFor("dry-run print job", async () => {
     const jobs = await request(warehouseUrl, "/api/admin/print-jobs", { cookie: warehouseCookie });
-    return jobs.payload.data.find((job) => job.id === printJobId && job.status === "PRINTED");
+    return jobs.payload.data.find((job) => job.id === printJobId && job.status === "RENDERED");
   });
 
   await request(warehouseUrl, "/api/admin/placements", {
