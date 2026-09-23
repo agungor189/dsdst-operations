@@ -290,18 +290,23 @@ test("full drills lock every restorable service image to the recorded registry d
   }
 });
 
-test("V2-16 source-set contract closes the supplied O/P/W/K/L bases", () => {
+test("V2-16 source-set pins the implementation content commit over the supplied O/P/W/K/L bases", () => {
   const sourceSet = JSON.parse(fs.readFileSync(new URL("../config/v2-16-source-set.json", import.meta.url), "utf8"));
   const revisions = Object.fromEntries(sourceSet.repositories.map(({ id, revision }) => [id, revision]));
   assert.equal(sourceSet.release, "V2-16");
   assert.deepEqual(Object.fromEntries(["O", "P", "W", "K", "L"].map((id) => [id, revisions[id]])), {
-    O: "db02c99a87f0d241fefd1be8fa33d21b082deda6",
+    O: "181be43abb1c76e91157a63a313032bc9462ee9f",
     P: "61ed1ad8fba25ed9d5c0b228308ff22da45febaf",
     W: "525e18c508c1191c0c4e4b725bda00defd930d2f",
     K: "0e0717c3f8d3f3f0af186b4c165524bc2e81724c",
     L: "add3987e0eb15e8742ecac490b5eb4e78b620ce5",
   });
   assert.equal(revisions.HUB, "f030c29b6ee41765289993fda1e94d1e484b5cac");
+  assert.deepEqual(sourceSet.basedOn, {
+    release: "V2-15",
+    sourceSet: "config/v2-15-source-set.json",
+    operationsClosureRevision: "db02c99a87f0d241fefd1be8fa33d21b082deda6",
+  });
 });
 
 test("source-set verification permits only the O closure controller to descend from pinned O content", () => {
