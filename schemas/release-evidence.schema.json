@@ -41,8 +41,8 @@
     },
     "services": {
       "type": "array",
-      "minItems": 5,
-      "maxItems": 5,
+      "minItems": 6,
+      "maxItems": 6,
       "items": { "$ref": "#/$defs/service" }
     }
   },
@@ -265,7 +265,7 @@
       "required": ["service_id", "component", "repository", "relationship", "declared_mapping_source", "runtime"],
       "properties": {
         "service_id": { "type": "string", "minLength": 1 },
-        "component": { "enum": ["P", "W", "K", "L", "renderer"] },
+        "component": { "enum": ["P", "W", "K", "L", "HUB", "renderer"] },
         "repository": { "type": "string", "minLength": 1 },
         "relationship": { "type": "string", "minLength": 1 },
         "declared_mapping_source": { "const": "compose.prod.yml" },

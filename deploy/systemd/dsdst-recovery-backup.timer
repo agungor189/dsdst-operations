@@ -1,0 +1,11 @@
+[Unit]
+Description=Create an hourly DSDST recovery point
+
+[Timer]
+OnCalendar=*-*-* *:00:00 UTC
+Persistent=true
+AccuracySec=1m
+Unit=dsdst-recovery-backup.service
+
+[Install]
+WantedBy=timers.target

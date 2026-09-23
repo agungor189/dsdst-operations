@@ -1,7 +1,7 @@
 # DSDST release evidence
 
 Bu belge PR01'in redaksiyonlu release kanıt sözleşmesidir. Amaç bir Git
-checkout'unu çalışan sürüm sanmak değil; çalışan P, W, K, L ve L kaynaklı
+checkout'unu çalışan sürüm sanmak değil; çalışan P, W, K, L, Customer Hub ve L kaynaklı
 `warehouse-label-renderer` için runtime commit, immutable image digest, şema,
 yapılandırma, volume, network ve port eşleşmesini aynı kanıt setinde kurmaktır.
 
@@ -67,6 +67,7 @@ gelmez. Gözlenen değerler manifestin ayrı `observed` alanlarına yazılır.
 | `dsdst-panel` | P | SQLite | `/data` rw, `/app/uploads` rw, `/backups` rw | edge, internal | loopback `${PANEL_PORT:-3000}` → 3000/tcp |
 | `dsdst-warehouse` | W | Yok | Yok | edge, internal | loopback `${WAREHOUSE_PORT:-3006}` → 3006/tcp |
 | `dsdst-kit-studio` | K | SQLite | `/data` rw, `/app/uploads` rw | edge, internal | loopback `${KIT_STUDIO_PORT:-3012}` → 3012/tcp |
+| `dsdst-customer-hub` | HUB | SQLite | `/data` rw, `/backups` rw | edge, internal | loopback `${CUSTOMER_HUB_PORT:-3100}` → 3100/tcp |
 | `label-printer` | L | JSON state v? | `/app/data` rw | edge, internal | loopback `${LABEL_PRINTER_PORT:-3013}` → 3000/tcp |
 | `warehouse-label-renderer` | L | Yok | aynı `/app/data` ro | internal | yalnız internal 3010/tcp |
 

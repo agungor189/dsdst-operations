@@ -104,6 +104,38 @@
       }
     },
     {
+      "service_id": "dsdst-customer-hub",
+      "component": "HUB",
+      "repository": "agungor189/dsdst-customer-hub",
+      "relationship": "adjacent Customer Hub service",
+      "declared_mapping_source": "compose.prod.yml",
+      "runtime": {
+        "commit": { "value": "NOT VERIFIED", "evidence_source": "NOT VERIFIED" },
+        "image": { "declared_reference": "NOT VERIFIED", "observed_reference": "NOT VERIFIED", "image_id": "NOT VERIFIED", "digest": "NOT VERIFIED", "source_repository": "NOT VERIFIED", "evidence_source": "NOT VERIFIED" },
+        "schema": { "kind": "sqlite", "version": "NOT VERIFIED", "evidence_source": "NOT VERIFIED" },
+        "configuration": {
+          "status": "NOT VERIFIED",
+          "fingerprint": "NOT VERIFIED",
+          "redacted": true,
+          "safe_keys": ["NODE_ENV", "PORT", "APP_ORIGIN", "PANEL_BASE_URL", "DATABASE_PATH", "ATTACHMENTS_DIR", "SESSION_SECURE", "MOCK_ADAPTERS_ENABLED", "APP_VERSION", "APP_COMMIT"]
+        },
+        "volumes": {
+          "declared": [
+            { "source_alias": "CUSTOMER_HUB_DATA_DIR", "target": "/data", "mode": "rw", "source_id": "NOT VERIFIED" },
+            { "source_alias": "CUSTOMER_HUB_BACKUP_DIR", "target": "/backups", "mode": "rw", "source_id": "NOT VERIFIED" }
+          ],
+          "observed": "NOT VERIFIED"
+        },
+        "networks": { "declared": ["edge", "internal"], "observed": "NOT VERIFIED" },
+        "ports": {
+          "declared": [
+            { "exposure": "published", "host_ip": "${BIND_ADDRESS:-127.0.0.1}", "host_port": "${CUSTOMER_HUB_PORT:-3100}", "container_port": 3100, "protocol": "tcp" }
+          ],
+          "observed": "NOT VERIFIED"
+        }
+      }
+    },
+    {
       "service_id": "label-printer",
       "component": "L",
       "repository": "agungor189/Label-Printer",

@@ -1,0 +1,18 @@
+[Unit]
+Description=DSDST verified encrypted recovery point
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=dsdst-operations
+Group=dsdst-operations
+WorkingDirectory=/opt/dsdst-operations
+EnvironmentFile=/etc/dsdst/operations.env
+ExecStart=/opt/dsdst-operations/scripts/backup.sh
+PrivateTmp=true
+NoNewPrivileges=true
+UMask=0027
+
+[Install]
+WantedBy=multi-user.target

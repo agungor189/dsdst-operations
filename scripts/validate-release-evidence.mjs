@@ -58,6 +58,19 @@ const EXPECTED_SERVICES = {
     ],
     ports: [{ exposure: "published", container_port: 3012, protocol: "tcp" }],
   },
+  "dsdst-customer-hub": {
+    component: "HUB",
+    repository: "agungor189/dsdst-customer-hub",
+    schemaKind: "sqlite",
+    schemaPath: {path_key: "DATABASE_PATH", mount_target: "/data"},
+    safeKeys: ["NODE_ENV", "PORT", "APP_ORIGIN", "PANEL_BASE_URL", "DATABASE_PATH", "ATTACHMENTS_DIR", "SESSION_SECURE", "MOCK_ADAPTERS_ENABLED", "APP_VERSION", "APP_COMMIT"],
+    networks: ["edge", "internal"],
+    volumes: [
+      { source_alias: "CUSTOMER_HUB_DATA_DIR", target: "/data", mode: "rw" },
+      { source_alias: "CUSTOMER_HUB_BACKUP_DIR", target: "/backups", mode: "rw" },
+    ],
+    ports: [{ exposure: "published", container_port: 3100, protocol: "tcp" }],
+  },
   "label-printer": {
     component: "L",
     repository: "agungor189/Label-Printer",
@@ -111,7 +124,7 @@ const requireExactKeys = (value, expectedKeys, path) => {
 };
 
 const sameJson = (left, right) => JSON.stringify(left) === JSON.stringify(right);
-const hostPorts = {"dsdst-panel": ["PANEL_PORT",3000], "dsdst-warehouse": ["WAREHOUSE_PORT",3006], "dsdst-kit-studio": ["KIT_STUDIO_PORT",3012], "label-printer": ["LABEL_PRINTER_PORT",3013]};
+const hostPorts = {"dsdst-panel": ["PANEL_PORT",3000], "dsdst-warehouse": ["WAREHOUSE_PORT",3006], "dsdst-kit-studio": ["KIT_STUDIO_PORT",3012], "dsdst-customer-hub": ["CUSTOMER_HUB_PORT",3100], "label-printer": ["LABEL_PRINTER_PORT",3013]};
 const mapping = ({source_id, ...rest}) => rest;
 
 export function getSafeConfigKeys(serviceId) {

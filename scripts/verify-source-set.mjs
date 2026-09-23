@@ -9,6 +9,7 @@ const expectedRelease = process.env.EXPECTED_SOURCE_SET_RELEASE || "V2-06";
 const defaultManifest = `${expectedRelease.toLowerCase()}-source-set.json`;
 const manifestPath = path.resolve(process.env.SOURCE_SET_MANIFEST || path.join(root, "config", defaultManifest));
 const allowDirty = process.argv.includes("--allow-dirty");
+const allowOperationsDescendant = process.argv.includes("--allow-operations-descendant");
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 const shaPattern = /^[a-f0-9]{40}$/;
 const defaults = {
@@ -21,6 +22,14 @@ const defaults = {
 };
 
 const git = (repositoryPath, ...args) => execFileSync("git", ["-C", repositoryPath, ...args], { encoding: "utf8" }).trim();
+const gitIsAncestor = (repositoryPath, ancestor, descendant) => {
+  try {
+    execFileSync("git", ["-C", repositoryPath, "merge-base", "--is-ancestor", ancestor, descendant], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+};
 const normalizeRemote = (value) => value
   .replace(/^git@github\.com:/, "")
   .replace(/^https:\/\/github\.com\//, "")
@@ -39,8 +48,12 @@ for (const entry of manifest.repositories) {
   const repositoryPath = path.resolve(process.env[entry.contextEnv] || defaults[entry.contextEnv] || "");
   if (!fs.existsSync(path.join(repositoryPath, ".git"))) throw new Error(`Missing git repository for ${entry.id}: ${repositoryPath}`);
   const observedRevision = git(repositoryPath, "rev-parse", "HEAD");
+  let controllerRevision;
   if (observedRevision !== entry.revision) {
-    throw new Error(`${entry.id} revision mismatch: expected ${entry.revision}, observed ${observedRevision}`);
+    const acceptedController = entry.id === "O" && allowOperationsDescendant &&
+      gitIsAncestor(repositoryPath, entry.revision, observedRevision);
+    if (!acceptedController) throw new Error(`${entry.id} revision mismatch: expected ${entry.revision}, observed ${observedRevision}`);
+    controllerRevision = observedRevision;
   }
   const remote = normalizeRemote(git(repositoryPath, "remote", "get-url", "origin"));
   if (remote !== entry.repository.toLowerCase()) {
@@ -50,7 +63,13 @@ for (const entry of manifest.repositories) {
     const dirty = git(repositoryPath, "status", "--porcelain");
     if (dirty) throw new Error(`${entry.id} working tree is not clean`);
   }
-  verified.push({ id: entry.id, repository: entry.repository, revision: observedRevision, role: entry.role || "release-source" });
+  verified.push({
+    id: entry.id,
+    repository: entry.repository,
+    revision: entry.revision,
+    role: entry.role || "release-source",
+    ...(controllerRevision ? { controller_revision: controllerRevision } : {}),
+  });
 }
 
 for (const required of ["O", "P", "W", "K", "L"]) {

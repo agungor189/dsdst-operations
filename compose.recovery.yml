@@ -1,0 +1,47 @@
+services:
+  dsdst-panel:
+    environment:
+      CLOUD_BACKUP_ENABLED: "false"
+      WAREHOUSE_PRINT_DRY_RUN: "true"
+    ports: !reset []
+    volumes: !override
+      - ${RESTORE_ROOT:?RESTORE_ROOT is required}/panel/data:/data
+      - ${RESTORE_ROOT:?RESTORE_ROOT is required}/panel/uploads:/app/uploads
+      - ${RESTORE_ROOT:?RESTORE_ROOT is required}/scratch/panel-backups:/backups
+
+  dsdst-warehouse:
+    ports: !reset []
+
+  dsdst-kit-studio:
+    ports: !reset []
+    volumes: !override
+      - ${RESTORE_ROOT:?RESTORE_ROOT is required}/kit/data:/data
+      - ${RESTORE_ROOT:?RESTORE_ROOT is required}/kit/uploads:/app/uploads
+
+  dsdst-customer-hub:
+    environment:
+      MOCK_ADAPTERS_ENABLED: "true"
+    ports: !reset []
+    volumes: !override
+      - ${RESTORE_ROOT:?RESTORE_ROOT is required}/customer-hub/data:/data
+      - ${RESTORE_ROOT:?RESTORE_ROOT is required}/scratch/customer-hub-backups:/backups
+
+  label-printer:
+    ports: !reset []
+    volumes: !override
+      - ${RESTORE_ROOT:?RESTORE_ROOT is required}/label/data:/app/data
+
+  warehouse-label-renderer:
+    volumes: !override
+      - ${RESTORE_ROOT:?RESTORE_ROOT is required}/label/data:/app/data:ro
+
+  operations-toolbox:
+    profiles: ["tools"]
+
+networks:
+  edge:
+    name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}-edge
+    internal: true
+  internal:
+    name: ${COMPOSE_PROJECT_NAME:?COMPOSE_PROJECT_NAME is required}-internal
+    internal: true

@@ -1,0 +1,9 @@
+FROM node:22-alpine
+
+RUN apk upgrade --no-cache \
+  && apk add --no-cache coreutils findutils gzip openssl rclone tar
+
+WORKDIR /operations
+
+USER node
+CMD ["true"]

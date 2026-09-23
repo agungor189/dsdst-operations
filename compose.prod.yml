@@ -232,20 +232,38 @@ services:
       start_period: 10s
 
   operations-toolbox:
-    image: alpine:3.20
+    image: ${OPERATIONS_TOOLBOX_IMAGE:-dsdst-operations-toolbox:local}
+    build:
+      context: .
+      dockerfile: Dockerfile.operations-toolbox
     profiles: ["tools"]
+    user: "${OPERATIONS_UID:-1000}:${OPERATIONS_GID:-1000}"
     read_only: true
     security_opt:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    environment:
+      CLOUD_BACKUP_RCLONE_REMOTE: ${CLOUD_BACKUP_RCLONE_REMOTE:-}
+      CLOUD_BACKUP_PREFIX: ${CLOUD_BACKUP_PREFIX:-production}
+      CLOUD_BACKUP_TIMEOUT_SECONDS: ${CLOUD_BACKUP_TIMEOUT_SECONDS:-900}
+      RECOVERY_OFFSITE_RCLONE_REMOTE: ${RECOVERY_OFFSITE_RCLONE_REMOTE:-}
+      RECOVERY_OFFSITE_PREFIX: ${RECOVERY_OFFSITE_PREFIX:-}
+      RECOVERY_ENCRYPTION_PASSPHRASE: ${RECOVERY_ENCRYPTION_PASSPHRASE:-}
+      RCLONE_CONFIG_DSDSTR2_TYPE: ${RCLONE_CONFIG_DSDSTR2_TYPE:-}
+      RCLONE_CONFIG_DSDSTR2_PROVIDER: ${RCLONE_CONFIG_DSDSTR2_PROVIDER:-}
+      RCLONE_CONFIG_DSDSTR2_ACCESS_KEY_ID: ${RCLONE_CONFIG_DSDSTR2_ACCESS_KEY_ID:-}
+      RCLONE_CONFIG_DSDSTR2_SECRET_ACCESS_KEY: ${RCLONE_CONFIG_DSDSTR2_SECRET_ACCESS_KEY:-}
+      RCLONE_CONFIG_DSDSTR2_ENDPOINT: ${RCLONE_CONFIG_DSDSTR2_ENDPOINT:-}
     volumes:
+      - ${PANEL_DATA_DIR:-panel_data}:/sources/panel-data:ro
       - ${PANEL_UPLOADS_DIR:-panel_uploads}:/sources/panel-uploads:ro
       - ${KIT_STUDIO_DATA_DIR:-kit_studio_data}:/sources/kit-data:ro
       - ${KIT_STUDIO_UPLOADS_DIR:-kit_studio_uploads}:/sources/kit-uploads:ro
       - ${LABEL_PRINTER_DATA_DIR:-label_printer_data}:/sources/labels:ro
       - ${CUSTOMER_HUB_DATA_DIR:-customer_hub_data}:/sources/customer-hub-data:ro
       - ${OPERATIONS_BACKUP_DIR:-./backups}:/backups
+      - ./scripts:/operations/scripts:ro
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     command: ["true"]

@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dsdst.example/schemas/recovery-point.schema.json",
+  "title": "DSDST V2 recovery point",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "format_version",
+    "recovery_point_id",
+    "immutable",
+    "created_at",
+    "completed_at",
+    "tool",
+    "status",
+    "components",
+    "provenance",
+    "verification",
+    "offsite"
+  ],
+  "properties": {
+    "format_version": { "const": "dsdst.recovery-point.v1" },
+    "recovery_point_id": { "type": "string", "pattern": "^rp-[A-Za-z0-9._-]+$" },
+    "immutable": { "const": true },
+    "created_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "tool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "backup_type"],
+      "properties": {
+        "name": { "const": "dsdst-operations-recovery" },
+        "version": { "type": "string" },
+        "backup_type": { "const": "complete-online-snapshot" }
+      }
+    },
+    "status": { "enum": ["SUCCESS", "INCOMPLETE", "FAILED"] },
+    "components": {
+      "type": "object",
+      "required": [
+        "panel_database",
+        "panel_uploads",
+        "kit_database",
+        "kit_uploads",
+        "label_state",
+        "customer_hub_database",
+        "customer_hub_attachments",
+        "source_set",
+        "source_set_observation",
+        "runtime_provenance"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "panel_database": { "$ref": "#/$defs/component" },
+        "panel_uploads": { "$ref": "#/$defs/component" },
+        "kit_database": { "$ref": "#/$defs/component" },
+        "kit_uploads": { "$ref": "#/$defs/component" },
+        "label_state": { "$ref": "#/$defs/component" },
+        "customer_hub_database": { "$ref": "#/$defs/component" },
+        "customer_hub_attachments": { "$ref": "#/$defs/component" },
+        "source_set": { "$ref": "#/$defs/component" },
+        "source_set_observation": { "$ref": "#/$defs/component" },
+        "runtime_provenance": { "$ref": "#/$defs/component" }
+      }
+    },
+    "provenance": { "type": "object" },
+    "verification": {
+      "type": "object",
+      "required": ["state"],
+      "properties": { "state": { "enum": ["VERIFIED", "FAILED"] } }
+    },
+    "offsite": {
+      "type": "object",
+      "required": ["enabled", "state"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "state": { "enum": ["PENDING", "DISABLED", "NOT_ATTEMPTED", "PERSISTED", "FAILED"] }
+      }
+    }
+  },
+  "$defs": {
+    "component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "kind", "required", "sha256", "size_bytes"],
+      "properties": {
+        "path": { "type": "string" },
+        "kind": { "enum": ["sqlite", "archive", "json-state", "provenance"] },
+        "required": { "const": true },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "integrity": { "const": "ok" },
+        "schema_version": { "type": "string" }
+      }
+    }
+  }
+}

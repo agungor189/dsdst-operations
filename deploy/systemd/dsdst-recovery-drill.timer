@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the DSDST isolated restore drill monthly
+
+[Timer]
+OnCalendar=*-*-01 00:15:00 UTC
+Persistent=true
+AccuracySec=5m
+Unit=dsdst-recovery-drill.service
+
+[Install]
+WantedBy=timers.target

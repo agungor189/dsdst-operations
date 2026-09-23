@@ -2,45 +2,45 @@
 set -eu
 
 ROOT_DIR=$(CDPATH='' && cd -- "$(dirname -- "$0")/.." && pwd)
-COMPOSE_FILE="$ROOT_DIR/compose.prod.yml"
-ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env}"
-DB_BACKUP=${1:-}
-CUSTOMER_HUB_DB_BACKUP=${2:-}
-DATA_ARCHIVE=${3:-}
+RECOVERY_POINT=${1:-}
+BACKUP_ROOT=${OPERATIONS_BACKUP_DIR:-$ROOT_DIR/backups}
+RESTORE_ROOT=${RECOVERY_RESTORE_ROOT:-$BACKUP_ROOT/restore-staging}
 
-if [ -z "$DB_BACKUP" ] || [ -z "$CUSTOMER_HUB_DB_BACKUP" ] || [ -z "$DATA_ARCHIVE" ]; then
-  echo "Usage: $0 <panel-backup.db> <customer-hub-backup.db> <app-data.tar.gz>" >&2
-  exit 1
+if [ -z "$RECOVERY_POINT" ]; then
+  echo "Usage: $0 <recovery-point-directory> [isolated-target-directory]" >&2
+  exit 2
 fi
 
-case "$DB_BACKUP" in
-  "$ROOT_DIR"/backups/panel/*) ;;
-  *) echo "Database backup must be under $ROOT_DIR/backups/panel" >&2; exit 1 ;;
-esac
-case "$CUSTOMER_HUB_DB_BACKUP" in
-  "$ROOT_DIR"/backups/customer-hub/*) ;;
-  *) echo "Customer Hub database backup must be under $ROOT_DIR/backups/customer-hub" >&2; exit 1 ;;
-esac
-case "$DATA_ARCHIVE" in
-  "$ROOT_DIR"/backups/*) ;;
-  *) echo "Data archive must be under $ROOT_DIR/backups" >&2; exit 1 ;;
+case "$RECOVERY_POINT" in
+  /*) ;;
+  *) RECOVERY_POINT="$ROOT_DIR/$RECOVERY_POINT" ;;
 esac
 
-[ -f "$DB_BACKUP" ] || { echo "Missing database backup: $DB_BACKUP" >&2; exit 1; }
-[ -f "$CUSTOMER_HUB_DB_BACKUP" ] || { echo "Missing Customer Hub database backup: $CUSTOMER_HUB_DB_BACKUP" >&2; exit 1; }
-[ -f "$DATA_ARCHIVE" ] || { echo "Missing data archive: $DATA_ARCHIVE" >&2; exit 1; }
+[ -d "$RECOVERY_POINT" ] || { echo "Recovery point does not exist: $RECOVERY_POINT" >&2; exit 1; }
+[ -f "$RECOVERY_POINT/manifest.json" ] || { echo "Recovery manifest is missing: $RECOVERY_POINT" >&2; exit 1; }
 
-DB_NAME=$(basename "$DB_BACKUP")
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T \
-  -e CHECK_DB="/backups/$DB_NAME" dsdst-panel \
-  node -e 'const Database=require("better-sqlite3"); const db=new Database(process.env.CHECK_DB,{readonly:true,fileMustExist:true}); const result=db.pragma("integrity_check"); db.close(); if(result.length!==1||result[0].integrity_check!=="ok"){console.error(result);process.exit(1)} console.log("SQLite integrity: ok")'
+RECOVERY_ID=$(basename "$RECOVERY_POINT")
+TARGET=${2:-$RESTORE_ROOT/$RECOVERY_ID}
+mkdir -p "$RESTORE_ROOT"
+RESTORE_ROOT=$(CDPATH='' && cd -- "$RESTORE_ROOT" && pwd)
+case "$TARGET" in
+  /*) ;;
+  *) TARGET="$RESTORE_ROOT/$TARGET" ;;
+esac
+case "$TARGET" in
+  "$RESTORE_ROOT"/*) ;;
+  *) echo "Restore target must be inside isolated root $RESTORE_ROOT" >&2; exit 1 ;;
+esac
 
-CUSTOMER_HUB_DB_NAME=$(basename "$CUSTOMER_HUB_DB_BACKUP")
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" exec -T \
-  -e CHECK_DB="/backups/$CUSTOMER_HUB_DB_NAME" dsdst-customer-hub \
-  node -e 'const Database=require("better-sqlite3"); const db=new Database(process.env.CHECK_DB,{readonly:true,fileMustExist:true}); const result=db.pragma("integrity_check"); db.close(); if(result.length!==1||result[0].integrity_check!=="ok"){console.error(result);process.exit(1)} console.log("Customer Hub SQLite integrity: ok")'
+set -- "$RECOVERY_POINT" "$TARGET"
+for candidate in \
+  "${PANEL_DATA_DIR:-}" "${PANEL_UPLOADS_DIR:-}" \
+  "${KIT_STUDIO_DATA_DIR:-}" "${KIT_STUDIO_UPLOADS_DIR:-}" \
+  "${LABEL_PRINTER_DATA_DIR:-}" "${CUSTOMER_HUB_DATA_DIR:-}"; do
+  case "$candidate" in
+    /*) set -- "$@" "$candidate" ;;
+  esac
+done
 
-docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" --profile tools run --rm \
-  operations-toolbox sh -c "tar -tzf /backups/$(basename "$DATA_ARCHIVE") | grep -Eq '^customer-hub-data/attachments(/|$)'"
-echo "Archive integrity: ok"
-echo "Restore check completed without changing production data."
+node --no-warnings "$ROOT_DIR/scripts/recovery/recovery-cli.mjs" restore "$@"
+echo "Restore verification completed in isolated target: $TARGET"
