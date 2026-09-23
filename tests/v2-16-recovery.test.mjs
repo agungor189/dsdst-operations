@@ -452,7 +452,7 @@ test("V2-16 source-set pins the implementation content commit over the supplied 
   const revisions = Object.fromEntries(sourceSet.repositories.map(({ id, revision }) => [id, revision]));
   assert.equal(sourceSet.release, "V2-16");
   assert.deepEqual(Object.fromEntries(["O", "P", "W", "K", "L"].map((id) => [id, revisions[id]])), {
-    O: "181be43abb1c76e91157a63a313032bc9462ee9f",
+    O: "3547b73951d0ac0781eedff538fa4bbb2e4fc204",
     P: "61ed1ad8fba25ed9d5c0b228308ff22da45febaf",
     W: "525e18c508c1191c0c4e4b725bda00defd930d2f",
     K: "0e0717c3f8d3f3f0af186b4c165524bc2e81724c",
