@@ -58,7 +58,7 @@ remain exact.
 | Cross-system local E2E | exact O/P/W/K/L/Hub source; real processes; isolated databases | PASS — 1/1 |
 | Compose merge model | prod + e2e/recovery/candidate rendered by Docker Compose | PASS — 1/1 |
 | Recovery / release | included recovery integrity, RPO/RTO, controller, cutover, rollback and tamper tests | PASS |
-| Container E2E | exact set `scripts/e2e.sh` | NOT VERIFIED — Docker daemon unavailable |
+| Container E2E | Ubuntu `dsdst-server`; exact set `SOURCE_SET_MANIFEST=config/v2-18-source-set.json ./scripts/e2e.sh` | PASS — 1/1, exit 0 |
 | Deployed runtime | PR01 container/image/config/schema/volume/network/port evidence | NOT VERIFIED |
 
 The local cross-system E2E executed real Panel, Warehouse BFF, Kit Studio, Label
@@ -69,6 +69,14 @@ selection; preview/render; package identity, suggestion and placement; sale fina
 snapshot and reservation; and Warehouse picking. Stock was 5 after receipt and stayed
 5 after placement, sale acceptance and internal pick, preserving the approved dispatch
 boundary.
+
+The subsequent Ubuntu `dsdst-server` container run brought Panel, Warehouse, Kit
+Studio, Label Printer, renderer and Customer Hub up healthy and passed the same
+canonical receiving, live-template, label, placement and picking workflow (tests 1,
+pass 1, fail 0, exit 0). This closes the container-integration blocker. The E2E script
+builds disposable local images, so this result does not establish an immutable registry
+digest, OCI source/revision, deployed schema/config/topology provenance, recovery point
+or cutover state.
 
 ## 3. Findings and fixes
 
@@ -221,8 +229,7 @@ boundary.
 - Fix: declare the isolated Hub backup volume in the E2E overlay and reproduce that env
   selection in the merge-model regression.
 - Regression test: `tests/v2-18-compose.test.mjs`.
-- Residual risk: container execution was not repeated because the host Docker daemon was
-  unavailable; model validation is green.
+- Residual risk: none for the E2E overlay; the exact Ubuntu container E2E is green.
 
 ### V218-12 — Runtime provenance is absent
 
@@ -230,9 +237,11 @@ boundary.
 - Component: deployed O/P/W/K/L/Hub/renderer topology
 - Invariant: runtime claims require service-specific image digest, container identity,
   OCI/source revision, configuration fingerprint, schema and topology evidence.
-- Reproduction: attempt the container gate; the host Docker daemon was unavailable and no
-  accepted PR01 production/candidate evidence bundle was supplied.
-- Root cause: runtime access/evidence is outside this source-only execution context.
+- Reproduction: the exact-source Ubuntu container E2E passes, but it uses locally built
+  disposable images and no accepted PR01 production/candidate evidence bundle was
+  supplied.
+- Root cause: an integration test proves cross-system behavior, not registry identity or
+  the physical identity/configuration/state of a deployed runtime.
 - Fix: none fabricated; status remains `NOT VERIFIED`.
 - Regression test: release-evidence validators correctly reject incomplete or invented
   runtime claims.
@@ -260,24 +269,108 @@ boundary.
 No open P0 remains. All source-discovered P1 and P2 defects except runtime provenance are
 closed by regression tests. One P1 go-live blocker remains:
 
-1. Capture and validate PR01 evidence from the exact candidate/deployed source set:
-   immutable image digests and OCI revisions, unique container identities, redacted config
-   fingerprints, stateful schema versions, exact volumes/networks/ports, health and smoke.
-2. Run the container E2E on an available Docker runtime and archive its exact-source
-   output. The merged Compose model is valid, but this run did not start containers.
-3. Demonstrate an accepted V2-16 recovery point and isolated restore drill within RPO/RTO
-   before any pilot cutover.
-4. Exercise the V2-17 candidate/cutover controller against the real route adapter under
-   explicit owner approval. No production restore, deploy, restart, migration or route
-   mutation was performed by V2-18.
+1. **Registry/OCI artifact gate.** Publish P/W/K/Hub/L and the O toolbox from their exact
+   V2-18 revisions to an approved registry. Every candidate reference must be
+   `repository@sha256:<64 hex>` and retain `RepoDigests`. Images must carry exact
+   `org.opencontainers.image.source` and `org.opencontainers.image.revision` labels. P,
+   W, K and Hub require independent image identities; Label Printer and renderer must use
+   the same L image, digest and revision. A local tag, local image ID, Git HEAD, build log
+   or successful E2E image is not runtime provenance.
+2. **Read-only PR01 provenance gate.** On an already running, digest-pinned exact V2-18
+   runtime, collect one bound observation for all six services: unique full container
+   IDs, declared/observed registry reference, immutable image ID/digest, OCI labels,
+   redacted config fingerprint, read-only schema version, exact volume source identity,
+   networks and ports. Validate it together with a redacted release-evidence manifest.
+3. **Recovery gate.** Create an exact V2-18 recovery point containing P/K/L/Hub state and
+   files, source set and runtime provenance; persist it offsite; then complete an isolated
+   restore drill within RPO/RTO. Current recovery acceptance is deliberately hard-bound
+   to V2-16, so it must receive a reviewed/versioned V2-18 contract before execution; a
+   V2-16 point must not be relabeled as V2-18 evidence.
+4. **Candidate/cutover gate.** After 1–3, prove a separately named candidate project,
+   networks, ports and new volume identities, then migration preflight, hydration,
+   health, read-only smoke, connectivity, one-writer fencing and route reconciliation.
+   Current release-plan validation is deliberately hard-bound to V2-17, so a reviewed
+   V2-18 plan/controller update is required before using it. Candidate services must
+   never mount an existing production volume. Cloudflare mutation remains a separately
+   approved final action and was not performed here.
 
-## 6. Final verdict and V2-19 entry criteria
+## 6. Next safe runtime-provenance step
+
+The next safe action is registry preparation followed by read-only collection; it is not
+a deploy, restart, migration, restore or route mutation. Run from the exact V2-18 O
+checkout on the authorized host without `set -x`, `tee` or terminal recording:
+
+```sh
+set -euo pipefail
+cd /approved/path/dsdst-operations
+
+EXPECTED_SOURCE_SET_RELEASE=V2-18 \
+SOURCE_SET_MANIFEST=config/v2-18-source-set.json \
+node scripts/verify-source-set.mjs --allow-operations-descendant
+```
+
+Before any candidate is started, its protected environment must pass the digest-reference
+shape check and each approved reference must exist in the registry. The variables below
+must come from the approved artifact record, not from local tags:
+
+```sh
+V218_PROJECT=dsdst-candidate-v2-18
+V218_CANDIDATE_ENV=/approved/secrets/v2-18-candidate.env
+
+node scripts/release/verify-candidate-env.mjs \
+  "$V218_CANDIDATE_ENV" "$V218_PROJECT"
+
+: "${PANEL_IMAGE:?set approved digest reference}"
+: "${WAREHOUSE_IMAGE:?set approved digest reference}"
+: "${KIT_STUDIO_IMAGE:?set approved digest reference}"
+: "${CUSTOMER_HUB_IMAGE:?set approved digest reference}"
+: "${LABEL_PRINTER_IMAGE:?set approved digest reference}"
+: "${OPERATIONS_TOOLBOX_IMAGE:?set approved digest reference}"
+
+for image in \
+  "$PANEL_IMAGE" "$WAREHOUSE_IMAGE" "$KIT_STUDIO_IMAGE" \
+  "$CUSTOMER_HUB_IMAGE" "$LABEL_PRINTER_IMAGE" "$OPERATIONS_TOOLBOX_IMAGE"
+do
+  docker buildx imagetools inspect "$image" >/dev/null
+done
+```
+
+Do not call `candidate-stack.sh up` from this report update. Once an authorized,
+already-running exact V2-18 digest-pinned runtime exists, collect only read-only evidence:
+
+```sh
+EVIDENCE_COMPOSE_FILE=/approved/path/dsdst-operations/compose.prod.yml
+EVIDENCE_ENV_FILE=/approved/secret-store/v2-18-runtime.env
+EVIDENCE_DIR=/approved/redacted/v2-18
+install -d -m 0700 "$EVIDENCE_DIR"
+
+node scripts/collect-runtime-provenance.mjs \
+  "$EVIDENCE_COMPOSE_FILE" "$EVIDENCE_ENV_FILE" \
+  > "$EVIDENCE_DIR/runtime-provenance.json"
+
+jq -e --slurpfile sourceSet config/v2-18-source-set.json '
+  ($sourceSet[0].repositories
+    | map({key: .repository, value: .revision}) | from_entries) as $expected
+  | all(.services[]; .revision == $expected[.source_repository])
+' "$EVIDENCE_DIR/runtime-provenance.json"
+
+node scripts/validate-release-evidence.mjs \
+  "$EVIDENCE_DIR/release-evidence.json" \
+  "$EVIDENCE_DIR/runtime-provenance.json"
+```
+
+The final validator command is run only after `release-evidence.json` is populated from
+that same collector capture. Any missing registry digest, wrong/missing OCI label,
+source-set mismatch, local-only image, reused independent image, L/renderer mismatch,
+old production volume on a candidate, unexpected network or non-loopback port must fail
+closed and remain `NOT VERIFIED`.
+
+## 7. Final verdict and V2-19 entry criteria
 
 **V2-18: FAIL.**
 
 - Source/code/system status: **CODE VERIFIED**.
 - Runtime/deployment status: **RUNTIME NOT VERIFIED**.
 - Open severity count: P0 = 0; P1 = 1 runtime go-live blocker; P2 = 0; P3 = 0.
-- V2-19 limited pilot is blocked until all four runtime-only items above are evidenced
+- V2-19 limited pilot is blocked until all four ordered runtime-only items above are evidenced
   against the exact V2-18 source set and the PR01 validator reports VERIFIED.
-
