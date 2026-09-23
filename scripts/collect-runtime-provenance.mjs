@@ -11,6 +11,8 @@ import { createRuntimeCaptureId, getRuntimeServicePolicies } from "./validate-re
 const SHA = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 const DIGEST = /^sha256:[0-9a-f]{64}$/;
 const NOT_APPLICABLE = "NOT APPLICABLE";
+const PROVENANCE_PROJECT = process.env.DSDST_PROVENANCE_PROJECT || "";
+const PROVENANCE_OVERLAY = process.env.DSDST_PROVENANCE_COMPOSE_OVERLAY || "";
 
 const SCHEMA_PROBES = {
   sqlite: `const Database=require("better-sqlite3");const db=new Database(process.argv[1],{readonly:true,fileMustExist:true});try{const row=db.prepare("SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1").get();if(!row||row.version===undefined||row.version===null)process.exit(2);process.stdout.write(JSON.stringify({version:String(row.version)}));}finally{db.close();}`,
@@ -190,8 +192,17 @@ export function collectRuntimeProvenance({composeFile, envFile, runDocker = dock
   if (!composeFile || !envFile) fail("compose and environment file paths are required");
   const capturedAt = new Date().toISOString();
   const services = [];
-  for (const policy of getRuntimeServicePolicies()) {
-    const composeArgs = ["compose", "--env-file", envFile, "-f", composeFile, "ps", "--no-trunc", "-q", policy.service_id];
+  if (PROVENANCE_OVERLAY && !path.isAbsolute(PROVENANCE_OVERLAY)) fail("provenance overlay path must be absolute");
+  for (const basePolicy of getRuntimeServicePolicies()) {
+    const policy = PROVENANCE_PROJECT ? {
+      ...basePolicy,
+      network_names: Object.fromEntries(basePolicy.networks.map((network) => [network, `${PROVENANCE_PROJECT}-${network}`])),
+    } : basePolicy;
+    const composeArgs = ["compose"];
+    if (PROVENANCE_PROJECT) composeArgs.push("--project-name", PROVENANCE_PROJECT);
+    composeArgs.push("--env-file", envFile, "-f", composeFile);
+    if (PROVENANCE_OVERLAY) composeArgs.push("-f", PROVENANCE_OVERLAY);
+    composeArgs.push("ps", "--no-trunc", "-q", policy.service_id);
     const ids = runDocker(composeArgs).split(/\s+/).filter(Boolean);
     if (ids.length !== 1 || !/^[a-f0-9]{64}$/.test(ids[0])) fail(`service ${policy.service_id} does not have exactly one full running container identity`);
     const container = dockerJson(["inspect", ids[0]], `container inspection for ${policy.service_id}`, runDocker);
