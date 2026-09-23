@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dsdst.example/schemas/image-manifest.schema.json",
+  "title": "DSDST immutable image manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "release", "generated_at", "source_set", "images"],
+  "properties": {
+    "schema_version": { "const": "dsdst.image-manifest.v1" },
+    "release": { "const": "V2-18" },
+    "generated_at": { "type": "string", "format": "date-time" },
+    "source_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "digest"],
+      "properties": {
+        "path": { "const": "config/v2-18-source-set.json" },
+        "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+      }
+    },
+    "images": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 7,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["service", "repository", "revision", "image_reference", "digest"],
+        "properties": {
+          "service": {
+            "enum": [
+              "dsdst-panel",
+              "dsdst-warehouse",
+              "dsdst-kit-studio",
+              "label-printer",
+              "warehouse-label-renderer",
+              "dsdst-customer-hub",
+              "operations-toolbox"
+            ]
+          },
+          "repository": { "type": "string", "pattern": "^agungor189/[A-Za-z0-9._-]+$" },
+          "revision": { "type": "string", "pattern": "^[a-f0-9]{40}$" },
+          "image_reference": { "type": "string", "pattern": "^ghcr\\.io/agungor189/[a-z0-9-]+@sha256:[a-f0-9]{64}$" },
+          "digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" }
+        }
+      }
+    }
+  }
+}

@@ -47,7 +47,7 @@ remain exact.
 | Gate | Evidence | Result |
 | --- | --- | --- |
 | Exact source / CI / E2E | V2-18 manifest, workflow-output parser, exact verifier, negative historical-manifest tests | PASS |
-| O architecture/contracts | `npm test` | PASS — 214/214 |
+| O architecture/contracts | `npm test` | PASS — 218/218 |
 | P domain/routes/security | `npm test` | PASS — 278/278 |
 | W client/BFF | `npm test`; typecheck; build; post-build secret scan | PASS — 102/102 |
 | K authoring client | `npm test`; typecheck; build | PASS — 78/78 |
@@ -275,7 +275,10 @@ closed by regression tests. One P1 go-live blocker remains:
    `org.opencontainers.image.source` and `org.opencontainers.image.revision` labels. P,
    W, K and Hub require independent image identities; Label Printer and renderer must use
    the same L image, digest and revision. A local tag, local image ID, Git HEAD, build log
-   or successful E2E image is not runtime provenance.
+   or successful E2E image is not runtime provenance. The manual
+   `publish-v2-18-images.yml` workflow and its fail-closed manifest validator are now
+   source-ready; this item remains open until a successful GHCR run produces and preserves
+   the six immutable registry references.
 2. **Read-only PR01 provenance gate.** On an already running, digest-pinned exact V2-18
    runtime, collect one bound observation for all six services: unique full container
    IDs, declared/observed registry reference, immutable image ID/digest, OCI labels,
