@@ -39,7 +39,7 @@
         "networks": { "declared": ["edge", "internal"], "observed": "NOT VERIFIED" },
         "ports": {
           "declared": [
-            { "exposure": "published", "host_ip": "${BIND_ADDRESS:-127.0.0.1}", "host_port": "${PANEL_PORT:-3000}", "container_port": 3000, "protocol": "tcp" }
+            { "exposure": "published", "host_ip": "127.0.0.1", "host_port": "${PANEL_PORT:-3000}", "container_port": 3000, "protocol": "tcp" }
           ],
           "observed": "NOT VERIFIED"
         }
@@ -65,7 +65,7 @@
         "networks": { "declared": ["edge", "internal"], "observed": "NOT VERIFIED" },
         "ports": {
           "declared": [
-            { "exposure": "published", "host_ip": "${BIND_ADDRESS:-127.0.0.1}", "host_port": "${WAREHOUSE_PORT:-3006}", "container_port": 3006, "protocol": "tcp" }
+            { "exposure": "published", "host_ip": "127.0.0.1", "host_port": "${WAREHOUSE_PORT:-3006}", "container_port": 3006, "protocol": "tcp" }
           ],
           "observed": "NOT VERIFIED"
         }
@@ -97,7 +97,7 @@
         "networks": { "declared": ["edge", "internal"], "observed": "NOT VERIFIED" },
         "ports": {
           "declared": [
-            { "exposure": "published", "host_ip": "${BIND_ADDRESS:-127.0.0.1}", "host_port": "${KIT_STUDIO_PORT:-3012}", "container_port": 3012, "protocol": "tcp" }
+            { "exposure": "published", "host_ip": "127.0.0.1", "host_port": "${KIT_STUDIO_PORT:-3012}", "container_port": 3012, "protocol": "tcp" }
           ],
           "observed": "NOT VERIFIED"
         }
@@ -129,7 +129,7 @@
         "networks": { "declared": ["edge", "internal"], "observed": "NOT VERIFIED" },
         "ports": {
           "declared": [
-            { "exposure": "published", "host_ip": "${BIND_ADDRESS:-127.0.0.1}", "host_port": "${CUSTOMER_HUB_PORT:-3100}", "container_port": 3100, "protocol": "tcp" }
+            { "exposure": "published", "host_ip": "127.0.0.1", "host_port": "${CUSTOMER_HUB_PORT:-3100}", "container_port": 3100, "protocol": "tcp" }
           ],
           "observed": "NOT VERIFIED"
         }
@@ -160,7 +160,7 @@
         "networks": { "declared": ["edge", "internal"], "observed": "NOT VERIFIED" },
         "ports": {
           "declared": [
-            { "exposure": "published", "host_ip": "${BIND_ADDRESS:-127.0.0.1}", "host_port": "${LABEL_PRINTER_PORT:-3013}", "container_port": 3000, "protocol": "tcp" }
+            { "exposure": "published", "host_ip": "127.0.0.1", "host_port": "${LABEL_PRINTER_PORT:-3013}", "container_port": 3000, "protocol": "tcp" }
           ],
           "observed": "NOT VERIFIED"
         }

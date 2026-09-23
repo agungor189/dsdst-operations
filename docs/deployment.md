@@ -1,18 +1,14 @@
 # Production deployment
 
-## First deployment
+## Release authority
 
-1. Clone the five application repositories and this repository as sibling directories, or set the five `*_CONTEXT` variables explicitly.
-2. Copy `.env.example` to `.env` and replace all placeholders. Obtain separate Panel API keys for Warehouse and Kit Studio with only their required permissions.
-3. Keep `BIND_ADDRESS=127.0.0.1` unless a firewall and TLS reverse proxy explicitly require another listener.
-4. Run `scripts/deploy.sh`.
-5. Confirm `scripts/healthcheck.sh`, then exercise login and one dry-run label print before enabling a physical printer.
+Blind in-place deployment was retired by V2-17. `scripts/deploy.sh` now fails closed without changing runtime state. All published host ports are hard-bound to `127.0.0.1`; external access is through the explicitly controlled Cloudflare route.
 
-Deployment is additive: the script validates configuration, builds/pulls images, starts containers, and waits for health. It does not delete databases, volumes, backups, old compose files, or images.
+Use `docs/runtime-release.md`. Production release requires an exact digest-pinned source/image set, manual approval, a fresh accepted V2-16 recovery point, isolated migration preflight, a separate candidate Compose project/volumes/networks/ports, health plus read-only smoke/connectivity checks, and an explicit Cloudflare cutover.
 
 ## Upgrades and rollback
 
-Run `scripts/backup.sh` before each upgrade. Pin immutable image tags in `.env`, deploy, and keep the previous tags. Roll back by restoring the previous tags and rerunning `scripts/deploy.sh`; only use a database restore after checking migration compatibility and validating the backup with `scripts/restore-check.sh`.
+The previous runtime becomes a stopped/read-only rollback target and its volume identities are retained for seven days. Rollback uses the explicit V2-17 command to restore the previous runtime and Cloudflare target identities. It never performs an automatic database restore. Restore remains a separate, approved V2-16 recovery operation.
 
 The old per-repository compose files remain valid during the transition. Remove them only after at least one successful production deployment, backup verification, rollback rehearsal, and confirmation that no host automation still calls them.
 

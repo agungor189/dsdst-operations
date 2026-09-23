@@ -15,7 +15,7 @@ services:
     restart: unless-stopped
     <<: *security
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${PANEL_PORT:-3000}:3000"
+      - "127.0.0.1:${PANEL_PORT:-3000}:3000"
     environment:
       NODE_ENV: production
       PORT: 3000
@@ -70,7 +70,7 @@ services:
       warehouse-label-renderer:
         condition: service_healthy
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${WAREHOUSE_PORT:-3006}:3006"
+      - "127.0.0.1:${WAREHOUSE_PORT:-3006}:3006"
     environment:
       NODE_ENV: production
       PORT: 3006
@@ -102,7 +102,7 @@ services:
       dsdst-panel:
         condition: service_healthy
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${KIT_STUDIO_PORT:-3012}:3012"
+      - "127.0.0.1:${KIT_STUDIO_PORT:-3012}:3012"
     environment:
       NODE_ENV: production
       PORT: 3012
@@ -137,7 +137,7 @@ services:
       dsdst-panel:
         condition: service_healthy
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${CUSTOMER_HUB_PORT:-3100}:3100"
+      - "127.0.0.1:${CUSTOMER_HUB_PORT:-3100}:3100"
     environment:
       NODE_ENV: production
       PORT: 3100
@@ -179,7 +179,7 @@ services:
       dsdst-panel:
         condition: service_healthy
     ports:
-      - "${BIND_ADDRESS:-127.0.0.1}:${LABEL_PRINTER_PORT:-3013}:3000"
+      - "127.0.0.1:${LABEL_PRINTER_PORT:-3013}:3000"
     environment:
       NODE_ENV: production
       PORT: 3000

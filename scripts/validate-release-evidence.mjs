@@ -273,7 +273,7 @@ const validateRuntime = (service, expected, path) => {
   if (!sameJson(portContract, expected.ports)) fail(`${path}.runtime.ports.declared`, "does not match the service mapping contract");
   const binding = hostPorts[service.service_id];
   const declaredPort = declaredPorts[0];
-  if (binding && (declaredPort.host_ip !== "${BIND_ADDRESS:-127.0.0.1}" || declaredPort.host_port !== `\${${binding[0]}:-${binding[1]}}`)) fail(`${path}.runtime.ports.declared`, "unexpected host binding declaration");
+  if (binding && (declaredPort.host_ip !== "127.0.0.1" || declaredPort.host_port !== `\${${binding[0]}:-${binding[1]}}`)) fail(`${path}.runtime.ports.declared`, "unexpected host binding declaration");
   validateObserved(runtime.ports.observed, `${path}.runtime.ports.observed`, validatePort);
   if (runtime.ports.observed !== UNKNOWN) {
     const observedContract = runtime.ports.observed.map(({ exposure, container_port, protocol }) => ({ exposure, container_port, protocol }));

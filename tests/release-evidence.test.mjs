@@ -120,7 +120,7 @@ function verifiedFixture() {
     for (const volume of r.volumes.declared) volume.source_id = "sha256:" + createHash("sha256").update(volume.source_alias).digest("hex");
     r.volumes.observed = structuredClone(r.volumes.declared);
     r.networks.observed = structuredClone(r.networks.declared);
-    r.ports.observed = r.ports.declared.map(p => p.exposure === "internal" ? {...p} : {...p, host_ip: "127.0.0.1", host_port: Number(p.host_port.match(/:-(\d+)/)[1])});
+    r.ports.observed = r.ports.declared.map(p => p.exposure === "internal" ? {...p} : {...p, host_port: Number(p.host_port.match(/:-(\d+)/)[1])});
     Object.assign(record, {
       schema: structuredClone(r.schema),
       configuration: structuredClone(r.configuration),
