@@ -29,7 +29,18 @@ cp -R "$RESTORED_ROOT/label/data/." /target/label-data/
 mkdir -p /target/customer-hub-data/attachments
 cp -R "$RESTORED_ROOT/customer-hub/data/attachments/." /target/customer-hub-data/attachments/
 
+: "${TARGET_UID:?TARGET_UID is required}"
+: "${TARGET_GID:?TARGET_GID is required}"
+
 node --no-warnings /operations/scripts/bootstrap-seed-service-keys.mjs \
   /target/panel-data/dsdst_panel.db
+
+chown -R "${TARGET_UID}:${TARGET_GID}" \
+  /target/panel-data \
+  /target/panel-uploads \
+  /target/kit-data \
+  /target/kit-uploads \
+  /target/label-data \
+  /target/customer-hub-data
 
 printf 'Candidate bootstrap hydration completed.\n'
