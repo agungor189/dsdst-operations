@@ -306,3 +306,25 @@ test('bootstrap seeds isolated Kit, Label and Hub service principals without cha
     ]);
   }
 });
+
+test('release candidate state volumes disable Docker image copy-up', () => {
+  const root = new URL('..', import.meta.url).pathname;
+  const overlay = fs.readFileSync(path.join(root, 'compose.release-candidate.yml'), 'utf8');
+
+  for (const source of [
+    'candidate_panel_data',
+    'candidate_panel_uploads',
+    'candidate_panel_backups',
+    'candidate_kit_data',
+    'candidate_kit_uploads',
+    'candidate_customer_hub_data',
+    'candidate_customer_hub_backups',
+    'candidate_label_data',
+  ]) {
+    const index = overlay.indexOf(`source: ${source}`);
+    assert.ok(index >= 0, `${source} must exist in candidate overlay`);
+
+    const block = overlay.slice(index, index + 180);
+    assert.match(block, /nocopy:\s*true/, `${source} must disable image copy-up`);
+  }
+});

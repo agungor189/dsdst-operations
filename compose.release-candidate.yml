@@ -5,9 +5,21 @@ services:
     ports: !override
       - "127.0.0.1:${CANDIDATE_PANEL_PORT:?CANDIDATE_PANEL_PORT is required}:3000"
     volumes:
-      - candidate_panel_data:/data
-      - candidate_panel_uploads:/app/uploads
-      - candidate_panel_backups:/backups
+      - type: volume
+        source: candidate_panel_data
+        target: /data
+        volume:
+          nocopy: true
+      - type: volume
+        source: candidate_panel_uploads
+        target: /app/uploads
+        volume:
+          nocopy: true
+      - type: volume
+        source: candidate_panel_backups
+        target: /backups
+        volume:
+          nocopy: true
 
   dsdst-warehouse:
     build: !reset null
@@ -21,8 +33,16 @@ services:
     ports: !override
       - "127.0.0.1:${CANDIDATE_KIT_STUDIO_PORT:?CANDIDATE_KIT_STUDIO_PORT is required}:3012"
     volumes:
-      - candidate_kit_data:/data
-      - candidate_kit_uploads:/app/uploads
+      - type: volume
+        source: candidate_kit_data
+        target: /data
+        volume:
+          nocopy: true
+      - type: volume
+        source: candidate_kit_uploads
+        target: /app/uploads
+        volume:
+          nocopy: true
 
   dsdst-customer-hub:
     build: !reset null
@@ -30,8 +50,16 @@ services:
     ports: !override
       - "127.0.0.1:${CANDIDATE_CUSTOMER_HUB_PORT:?CANDIDATE_CUSTOMER_HUB_PORT is required}:3100"
     volumes:
-      - candidate_customer_hub_data:/data
-      - candidate_customer_hub_backups:/backups
+      - type: volume
+        source: candidate_customer_hub_data
+        target: /data
+        volume:
+          nocopy: true
+      - type: volume
+        source: candidate_customer_hub_backups
+        target: /backups
+        volume:
+          nocopy: true
 
   label-printer:
     build: !reset null
@@ -39,13 +67,22 @@ services:
     ports: !override
       - "127.0.0.1:${CANDIDATE_LABEL_PRINTER_PORT:?CANDIDATE_LABEL_PRINTER_PORT is required}:3000"
     volumes:
-      - candidate_label_data:/app/data
+      - type: volume
+        source: candidate_label_data
+        target: /app/data
+        volume:
+          nocopy: true
 
   warehouse-label-renderer:
     build: !reset null
     image: ${LABEL_PRINTER_IMAGE:?LABEL_PRINTER_IMAGE immutable digest is required}
     volumes:
-      - candidate_label_data:/app/data:ro
+      - type: volume
+        source: candidate_label_data
+        target: /app/data
+        read_only: true
+        volume:
+          nocopy: true
 
   operations-toolbox:
     build: !reset null
