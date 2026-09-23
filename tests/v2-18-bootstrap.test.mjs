@@ -405,3 +405,27 @@ test('runtime provenance ignores unbound image EXPOSE metadata but rejects unexp
     /unexpected runtime port is published/i,
   );
 });
+
+test('recovery toolbox always has canonical source-set config mounted read-only', () => {
+  const root = new URL('..', import.meta.url).pathname;
+
+  const compose = fs.readFileSync(
+    path.join(root, 'compose.prod.yml'),
+    'utf8'
+  );
+
+  const bootstrapRecovery = fs.readFileSync(
+    path.join(root, 'scripts/bootstrap-create-v2-18-recovery.sh'),
+    'utf8'
+  );
+
+  assert.match(
+    compose,
+    /\.\/config:\/operations\/config:ro/,
+  );
+
+  assert.match(
+    bootstrapRecovery,
+    /src=\$\{ROOT_DIR\}\/config,dst=\/operations\/config,readonly/,
+  );
+});
