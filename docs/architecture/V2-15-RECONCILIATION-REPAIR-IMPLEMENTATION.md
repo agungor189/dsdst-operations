@@ -23,12 +23,12 @@ Run, finding, block, proposal and history changes carry operation identity and a
 ## Checks
 
 - inventory lot, ledger, active location/package, reservation and `central_stock` totals;
-- sale snapshot gross/discount/VAT/net/commission consistency;
+- sale snapshot/line gross, discount, VAT, net and commission consistency, COGS finalization totals and known-expense FX conversion;
 - sold published-kit frozen version/content hash;
 - returned/refunded quantity and money bounds;
-- accepted channel order canonical sale/reservation links and outbound projection versions;
+- accepted channel order canonical sale/reservation links plus latest stock, price and tracking payload/hash consistency;
 - dispatched shipment handoff, inventory dispatch and COGS chain;
-- print payload hash, event state and reprint linkage.
+- print template-version, payload, printable/artifact hash, event state and reprint linkage.
 
 ## Migration and rollback impact
 
@@ -40,4 +40,3 @@ P migration v87 is forward-only and creates control-plane tables, indexes and ap
 - Only `central_stock` is registered for automatic rebuild.
 - Channel settlement/bank reconciliation remains blocked by the existing owner decision.
 - No runtime, production data, deployment or V2-16 recovery claim is made.
-
