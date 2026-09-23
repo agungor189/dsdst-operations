@@ -8,13 +8,15 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const panelRoot = path.resolve(process.env.PANEL_CONTEXT || path.join(root, "..", "ChatGPT", "panel-kit-yonetimi"));
 const read = (...segments) => fs.readFileSync(path.join(panelRoot, ...segments), "utf8");
 
-test("Panel v79-v80 owns the generic channel inbox, mapping, policy, cursor, outbox and exception contracts", () => {
+test("Panel v79-v81 owns the generic channel inbox, package identity, policy, cursor, outbox and exception contracts", () => {
   const migration = read("server", "migrations", "runner.ts");
   const schema = read("server", "db", "channelGatewaySchema.ts");
   const remediation = read("server", "db", "channelGatewayRemediationSchema.ts");
+  const correctness = read("server", "db", "channelGatewayCorrectnessSchema.ts");
   assert.match(migration, /version:\s*79[\s\S]*add_channel_gateway/);
   assert.match(migration, /version:\s*80[\s\S]*remediate_channel_gateway_execution/);
-  assert.match(migration, /CURRENT_SCHEMA_VERSION = 80/);
+  assert.match(migration, /version:\s*81[\s\S]*correct_channel_gateway_package_finance_versioning/);
+  assert.match(migration, /CURRENT_SCHEMA_VERSION = 81/);
   for (const table of [
     "channel_accounts", "channel_product_mappings", "channel_commission_terms", "channel_stock_buffers",
     "channel_inbound_events", "channel_orders", "channel_order_lines", "channel_price_variances",
@@ -27,6 +29,13 @@ test("Panel v79-v80 owns the generic channel inbox, mapping, policy, cursor, out
   assert.match(schema, /channel commission terms are immutable/);
   assert.match(remediation, /lease_token/);
   assert.match(remediation, /idx_channel_jobs_claim_ready/);
+  assert.match(correctness, /CREATE TABLE channel_order_packages/);
+  assert.match(correctness, /CREATE TABLE channel_order_package_versions/);
+  assert.match(correctness, /external_package_id/);
+  assert.match(correctness, /package_seller_discount_minor/);
+  assert.match(correctness, /package_ty_discount_minor/);
+  assert.match(correctness, /package_total_price_minor/);
+  assert.match(correctness, /channel package version evidence is immutable/);
 });
 
 test("gateway accepts marketplace orders only through canonical sales, inventory, finance and returns services", () => {
@@ -84,6 +93,18 @@ test("verified Trendyol polling and stock-price publication run through the gate
   assert.match(transport, /\/orders\/stream/);
   assert.match(transport, /gateway\.ingest/);
   assert.match(transport, /gateway\.updatePollingCursor/);
+  assert.match(transport, /shipmentPackageId/);
+  assert.match(transport, /byOrder/);
+  assert.match(transport, /lineGrossAmount/);
+  assert.match(transport, /lineUnitPrice/);
+  assert.match(transport, /lineSellerDiscount/);
+  assert.match(transport, /lineTyDiscount/);
+  assert.match(transport, /packageGrossAmount/);
+  assert.match(transport, /packageSellerDiscount/);
+  assert.match(transport, /packageTyDiscount/);
+  assert.match(transport, /packageTotalDiscount/);
+  assert.match(transport, /packageTotalPrice/);
+  assert.match(transport, /TRENDYOL_FINANCIAL_RECONCILIATION_FAILED/);
   assert.match(transport, /\/products\/price-and-inventory/);
   assert.match(transport, /quantityBaseInt/);
   assert.match(transport, /channelPriceMinor/);
@@ -99,6 +120,8 @@ test("canonical projections enqueue durable jobs and exception reprocessing pres
   const inventory = read("server", "modules", "inventory", "inventoryService.ts");
   assert.match(projection, /INSERT INTO channel_outbound_jobs/);
   assert.match(projection, /ON CONFLICT\(account_id,product_id,job_kind,source_version\) DO NOTHING/);
+  assert.match(projection, /operationId: input\.operationId, payloadHash/);
+  assert.match(projection, /canonical:v2:/);
   assert.match(inventory, /enqueueCanonicalChannelChanges/);
   assert.match(gateway, /claimReadyOutboundJobs/);
   assert.match(gateway, /processClaimedOutboundJob/);
@@ -107,4 +130,7 @@ test("canonical projections enqueue durable jobs and exception reprocessing pres
   assert.match(gateway, /channels\.exception\.resolve-reprocess\.v1/);
   assert.match(gateway, /state='RESOLVED',resolved_at=/);
   assert.match(gateway, /WHERE id=\? AND sale_id IS NULL/);
+  assert.match(gateway, /PARTIAL_PACKAGE_TRANSITION_REQUIRES_POLICY/);
+  assert.match(gateway, /providerLineFinancial/);
+  assert.match(gateway, /providerOrderFinancial/);
 });
