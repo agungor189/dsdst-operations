@@ -10,13 +10,15 @@ const warehouseRoot = path.resolve(process.env.WAREHOUSE_CONTEXT || path.join(ro
 const readPanel = (...segments) => fs.readFileSync(path.join(panelRoot, ...segments), "utf8");
 const readWarehouse = (...segments) => fs.readFileSync(path.join(warehouseRoot, ...segments), "utf8");
 
-test("Panel v83 adds forward-only provider-native Geliver evidence without rewriting accepted V82 shipment history", () => {
+test("Panel v83-v84 adds forward-only Geliver evidence and shipment outbound execution without rewriting accepted V82 history", () => {
   const migration = readPanel("server", "migrations", "runner.ts");
   const schema = readPanel("server", "db", "shipmentCarrierSchema.ts");
   const remediation = readPanel("server", "db", "geliverRemediationSchema.ts");
+  const outbound = readPanel("server", "db", "channelShipmentOutboundSchema.ts");
   assert.match(migration, /version:\s*82[\s\S]*add_shipment_carrier_gateway/);
   assert.match(migration, /version:\s*83[\s\S]*geliver_verified_flow_remediation/);
-  assert.match(migration, /CURRENT_SCHEMA_VERSION = 83/);
+  assert.match(migration, /version:\s*84[\s\S]*wire_shipment_channel_outbound_execution/);
+  assert.match(migration, /CURRENT_SCHEMA_VERSION = 84/);
   for (const table of [
     "shipment_preparations", "shipment_packages", "shipment_carrier_selections", "shipment_booking_jobs",
     "shipment_booking_attempts", "shipment_provider_bookings", "shipment_labels", "shipment_state_events",
@@ -37,6 +39,10 @@ test("Panel v83 adds forward-only provider-native Geliver evidence without rewri
   assert.match(remediation, /RECONCILE_REQUIRED/);
   assert.match(remediation, /tracking_number\s+TEXT,/);
   assert.doesNotMatch(remediation, /width_mm|height_mm|dpi|printer_compatibility/);
+  assert.match(outbound, /CREATE TABLE channel_shipment_outbound_attempts/);
+  assert.match(outbound, /attempt_count/);
+  assert.match(outbound, /lease_token/);
+  assert.match(outbound, /channel shipment outbound attempt is immutable/);
 });
 
 test("PACKED creates one preparation while only confirmed physical handoff can dispatch inventory and FIFO COGS", () => {
@@ -114,6 +120,29 @@ test("handoff routes marketplace tracking through V2-12, records V2-09 actual ch
   assert.match(service, /quote_amount_minor/);
   assert.doesNotMatch(service.slice(service.indexOf("selectCarrier"), service.indexOf("requestBooking")), /recordExpenseFact|finalizeDispatch/);
   assert.match(service, /RETURN_FLOW_REQUIRED/);
+});
+
+test("V2-12 durably claims and processes shipment tracking/status only through verified Trendyol transport", () => {
+  const service = readPanel("server", "modules", "shipping", "shipmentService.ts");
+  const gateway = readPanel("server", "modules", "channels", "channelGateway.ts");
+  const transport = readPanel("server", "modules", "channels", "trendyolGatewayTransport.ts");
+  const server = readPanel("server.ts");
+  assert.match(service, /sourceVersion = `shipment:v3:\$\{payloadHash\}`/);
+  assert.match(gateway, /channel_shipment_outbound_jobs/);
+  assert.match(gateway, /outboundType:\s*"SHIPMENT"/);
+  assert.match(gateway, /processClaimedShipmentOutboundJob/);
+  assert.match(gateway, /channel_shipment_outbound_attempts/);
+  assert.match(gateway, /CHANNEL_TRACKING_PENDING/);
+  assert.match(gateway, /CHANNEL_SHIPMENT_MAPPING_UNVERIFIED/);
+  assert.match(gateway, /providerMutationId = `trendyol:alternative-delivery:/);
+  assert.match(gateway, /HEPSIBURADA:[\s\S]*enabledTransport: false/);
+  assert.match(gateway, /N11:[\s\S]*enabledTransport: false/);
+  assert.match(gateway, /SHOPIFY:[\s\S]*enabledTransport: false/);
+  assert.match(transport, /TRACKING_STATUS/);
+  assert.match(transport, /alternative-delivery/);
+  assert.match(transport, /isPhoneNumber:\s*false/);
+  assert.match(server, /channel_shipment_outbound_jobs/);
+  assert.match(server, /transport\.publish/);
 });
 
 test("Warehouse is a whitelisted live-offer operator client with structured packages, refresh, cancel and handoff", () => {
