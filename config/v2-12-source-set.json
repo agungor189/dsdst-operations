@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "dsdst.test-source-set.v1",
+  "release": "V2-12",
+  "basedOn": {
+    "release": "V2-11",
+    "sourceSet": "config/v2-11-source-set.json",
+    "operationsClosureRevision": "c8e8e94423bfdb634768dd6b22f6eea56614d723"
+  },
+  "repositories": [
+    { "id": "O", "repository": "agungor189/dsdst-operations", "contextEnv": "OPERATIONS_CONTEXT", "revision": "8c6dca56e695f068ffc1216b08daf97ad69451c4" },
+    { "id": "P", "repository": "agungor189/panel-kit-yonetimi", "contextEnv": "PANEL_CONTEXT", "revision": "14645a07eab57ded9a313b391de252c3702507ad" },
+    { "id": "W", "repository": "agungor189/Dsdst-Warehouse", "contextEnv": "WAREHOUSE_CONTEXT", "revision": "ec141480145bb8159570f8e6ed1c387de4fa08e3" },
+    { "id": "K", "repository": "agungor189/dsdst-kit-studio", "contextEnv": "KIT_STUDIO_CONTEXT", "revision": "0e0717c3f8d3f3f0af186b4c165524bc2e81724c" },
+    { "id": "L", "repository": "agungor189/Label-Printer", "contextEnv": "LABEL_PRINTER_CONTEXT", "revision": "c57d9df0f412dae2c022093f0d7ac8591754edec" }
+  ]
+}
