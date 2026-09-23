@@ -20,7 +20,7 @@ test("V2-17 exact source set descends only O from the accepted V2-16 closure", (
     operationsClosureRevision: "e64142f18eb6a2c3fe7c0f084a393c0871c76ee6",
   });
   assert.deepEqual(revisions, {
-    O: "35374d1f44f7d3f7b067682e73d8a5b527ecad02",
+    O: "05494350af247e3bb31cc87bfdbe0dcfe303348f",
     P: "61ed1ad8fba25ed9d5c0b228308ff22da45febaf",
     W: "525e18c508c1191c0c4e4b725bda00defd930d2f",
     K: "0e0717c3f8d3f3f0af186b4c165524bc2e81724c",
