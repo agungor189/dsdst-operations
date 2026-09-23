@@ -20,7 +20,7 @@ test("Panel v77 publication plus forward-only v78 remediation own canonical kit 
 
   assert.match(migration, /version:\s*77[\s\S]*add_published_kits_and_profile_piece_inventory/);
   assert.match(migration, /version:\s*78[\s\S]*remediate_profile_cut_delivery_and_legacy_representation/);
-  assert.match(migration, /CURRENT_SCHEMA_VERSION = 78/);
+  assert.match(migration, /CURRENT_SCHEMA_VERSION = 79/);
   for (const table of [
     "kit_publication_settings", "published_kits", "published_kit_versions",
     "published_kit_version_components", "published_kit_version_cuts",
