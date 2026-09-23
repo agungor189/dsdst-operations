@@ -13,12 +13,12 @@ const previousManifestPath = path.join(root, "config", "v2-14-source-set.json");
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 const previous = JSON.parse(fs.readFileSync(previousManifestPath, "utf8"));
 
-test("V2-15 source set closes the exact accepted O source pin and P/W/K/L revisions", () => {
+test("V2-15 source set pins a descendant O content revision without self-reference and exact P/W/K/L revisions", () => {
   const byId = new Map(manifest.repositories.map((entry) => [entry.id, entry.revision]));
   assert.equal(manifest.release, "V2-15");
   assert.deepEqual(Object.fromEntries(byId), {
-    O: "82f8826bee82cf60c1cecc8a8b3ec373bc3b5562",
-    P: "a5bf029d559bf996ccb9ef905102c95da968a762",
+    O: "a5019876d2a1bc0fe8b115c991c2241548f2f1db",
+    P: "61ed1ad8fba25ed9d5c0b228308ff22da45febaf",
     W: "525e18c508c1191c0c4e4b725bda00defd930d2f",
     K: "0e0717c3f8d3f3f0af186b4c165524bc2e81724c",
     L: "add3987e0eb15e8742ecac490b5eb4e78b620ce5",
@@ -26,8 +26,12 @@ test("V2-15 source set closes the exact accepted O source pin and P/W/K/L revisi
   assert.deepEqual(manifest.basedOn, { release: "V2-14", sourceSet: "config/v2-14-source-set.json", operationsClosureRevision: "e99668d6eb8a511014391b6a604d415dba12d061" });
   for (const revision of byId.values()) assert.match(revision, /^[a-f0-9]{40}$/);
   const old = new Map(previous.repositories.map((entry) => [entry.id, entry.revision]));
-  for (const id of ["O", "K", "L"]) assert.equal(byId.get(id), old.get(id));
-  for (const id of ["P", "W"]) assert.notEqual(byId.get(id), old.get(id));
+  for (const id of ["K", "L"]) assert.equal(byId.get(id), old.get(id));
+  for (const id of ["O", "P", "W"]) assert.notEqual(byId.get(id), old.get(id));
+  const head = spawnSync("git", ["-C", root, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+  assert.notEqual(byId.get("O"), head, "the source manifest must pin the content commit, not its own closure commit");
+  assert.equal(spawnSync("git", ["-C", root, "merge-base", "--is-ancestor", manifest.basedOn.operationsClosureRevision, byId.get("O")], { encoding: "utf8" }).status, 0);
+  assert.equal(spawnSync("git", ["-C", root, "merge-base", "--is-ancestor", byId.get("O"), head], { encoding: "utf8" }).status, 0);
 });
 
 test("source-set verifier accepts V2-15 and rejects the historical V2-14 manifest", () => {
