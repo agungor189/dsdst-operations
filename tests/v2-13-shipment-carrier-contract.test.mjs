@@ -10,11 +10,13 @@ const warehouseRoot = path.resolve(process.env.WAREHOUSE_CONTEXT || path.join(ro
 const readPanel = (...segments) => fs.readFileSync(path.join(panelRoot, ...segments), "utf8");
 const readWarehouse = (...segments) => fs.readFileSync(path.join(warehouseRoot, ...segments), "utf8");
 
-test("Panel v82 owns forward-only canonical shipment, package, provider, label, state, charge and channel evidence", () => {
+test("Panel v83 adds forward-only provider-native Geliver evidence without rewriting accepted V82 shipment history", () => {
   const migration = readPanel("server", "migrations", "runner.ts");
   const schema = readPanel("server", "db", "shipmentCarrierSchema.ts");
+  const remediation = readPanel("server", "db", "geliverRemediationSchema.ts");
   assert.match(migration, /version:\s*82[\s\S]*add_shipment_carrier_gateway/);
-  assert.match(migration, /CURRENT_SCHEMA_VERSION = 82/);
+  assert.match(migration, /version:\s*83[\s\S]*geliver_verified_flow_remediation/);
+  assert.match(migration, /CURRENT_SCHEMA_VERSION = 83/);
   for (const table of [
     "shipment_preparations", "shipment_packages", "shipment_carrier_selections", "shipment_booking_jobs",
     "shipment_booking_attempts", "shipment_provider_bookings", "shipment_labels", "shipment_state_events",
@@ -28,6 +30,13 @@ test("Panel v82 owns forward-only canonical shipment, package, provider, label, 
   assert.match(schema, /shipment provider booking is immutable/);
   assert.match(schema, /shipment label provenance is immutable/);
   assert.match(schema, /shipment actual charge provenance is immutable/);
+  for (const table of ["shipment_recipient_snapshots", "geliver_create_jobs", "geliver_create_attempts",
+    "geliver_provider_shipments", "geliver_offer_observations", "geliver_offer_selections", "geliver_accept_jobs",
+    "geliver_accept_attempts", "geliver_booking_facts", "geliver_label_observations", "geliver_tracking_observations",
+    "geliver_cancellation_facts"]) assert.match(remediation, new RegExp(`CREATE TABLE ${table}`));
+  assert.match(remediation, /RECONCILE_REQUIRED/);
+  assert.match(remediation, /tracking_number\s+TEXT,/);
+  assert.doesNotMatch(remediation, /width_mm|height_mm|dpi|printer_compatibility/);
 });
 
 test("PACKED creates one preparation while only confirmed physical handoff can dispatch inventory and FIFO COGS", () => {
@@ -61,29 +70,36 @@ test("operator choice, N packages and measurement precedence fail closed without
   assert.match(service, /package numbers must be unique and consecutive/i);
 });
 
-test("Geliver adapter contract is verified only to official capability level and live transport remains fail-closed", () => {
-  const service = readPanel("server", "modules", "shipping", "shipmentService.ts");
+test("verified official SDK flow disables side-effect retries and reconciles uncertain create/accept outcomes", () => {
+  const service = readPanel("server", "modules", "shipping", "geliverFlowService.ts");
+  const packageJson = JSON.parse(readPanel("package.json"));
+  assert.equal(packageJson.dependencies["@geliver/sdk"], "1.3.0");
   assert.match(service, /officialDocumentation:\s*"https:\/\/docs\.geliver\.io"/);
   assert.match(service, /officialSdk:\s*"https:\/\/github\.com\/GeliverApp\/geliver-js"/);
-  assert.match(service, /enabled:\s*false/);
-  assert.match(service, /provider-side idempotency/);
-  assert.match(service, /serverIdempotencyVerified/);
-  assert.match(service, /GELIVER_TRANSPORT_DISABLED/);
-  assert.match(service, /requestIdentity = `dsdst:\$\{shipmentId\}:package:\$\{pack\.packageNumber\}`/);
-  assert.match(service, /BLOCKED_UNCERTAIN/);
-  assert.match(service, /provider_shipment_id/);
+  assert.match(service, /new GeliverClient\([\s\S]*maxRetries:\s*0/);
+  assert.match(service, /shipments\.create/);
+  assert.match(service, /shipments\.list\(\{ orderNumber/);
+  assert.match(service, /shipments\.get/);
+  assert.match(service, /transactions\.acceptOffer/);
+  assert.match(service, /shipments\.cancel/);
+  assert.match(service, /GELIVER_CREATE_RECONCILIATION_PENDING/);
+  assert.match(service, /GELIVER_ACCEPT_RECONCILIATION_PENDING/);
+  assert.match(service, /create will not be retried automatically/);
+  assert.match(service, /acceptOffer will not be retried automatically/);
+  assert.match(service, /productPaymentOnDelivery:\s*false/);
 });
 
-test("provider tracking and immutable 100x150 XP-470B label evidence never become generic print state", () => {
-  const service = readPanel("server", "modules", "shipping", "shipmentService.ts");
-  const schema = readPanel("server", "db", "shipmentCarrierSchema.ts");
+test("tracking is nullable and refreshable while provider-native labels carry no invented print-media metadata", () => {
+  const service = readPanel("server", "modules", "shipping", "geliverFlowService.ts");
+  const schema = readPanel("server", "db", "geliverRemediationSchema.ts");
+  assert.match(service, /trackingMayArriveLater:\s*true/);
   assert.match(service, /trackingNumber/);
   assert.match(service, /trackingUrl/);
-  assert.match(service, /widthMm !== 100/);
-  assert.match(service, /heightMm !== 150/);
-  assert.match(service, /dpi !== 203/);
-  assert.match(schema, /printer_compatibility[\s\S]*XPRINTER_XP_470B_203DPI/);
-  assert.doesNotMatch(schema, /print_state|printed_at|print_job/);
+  assert.match(service, /labelURL/);
+  assert.match(service, /responsiveLabelURL/);
+  assert.match(service, /labelFileType/);
+  assert.match(schema, /artifact_sha256/);
+  assert.doesNotMatch(schema, /width_mm|height_mm|dpi|printer_compatibility|print_state|printed_at|print_job/);
 });
 
 test("handoff routes marketplace tracking through V2-12, records V2-09 actual charge and emits shipped notification once", () => {
@@ -100,20 +116,25 @@ test("handoff routes marketplace tracking through V2-12, records V2-09 actual ch
   assert.match(service, /RETURN_FLOW_REQUIRED/);
 });
 
-test("Warehouse remains a whitelisted operator client with explicit package, carrier, booking, cancel and handoff commands", () => {
+test("Warehouse is a whitelisted live-offer operator client with structured packages, refresh, cancel and handoff", () => {
   const bff = readWarehouse("server", "app.ts");
   const client = readWarehouse("src", "lib", "api.ts");
   const page = readWarehouse("src", "pages", "ShipmentPage.tsx");
   assert.match(bff, /\/api\/shipping\/v1\/shipments\/:id\/packages/);
-  assert.match(bff, /\/api\/shipping\/v1\/shipments\/:id\/carrier-selection/);
-  assert.match(bff, /\/api\/shipping\/v1\/shipments\/:id\/booking/);
+  assert.match(bff, /\/api\/shipping\/v1\/shipments\/:id\/geliver\/offers/);
+  assert.match(bff, /\/api\/shipping\/v1\/shipments\/:id\/geliver\/refresh/);
+  assert.match(bff, /\/api\/shipping\/v1\/shipments\/:id\/geliver\/offers\/:offerId\/accept/);
   assert.match(bff, /\/api\/shipping\/v1\/shipments\/:id\/cancel/);
   assert.match(bff, /\/api\/shipping\/v1\/shipments\/:id\/handoff/);
   assert.match(bff, /PHYSICAL_HANDOFF_REQUIRED/);
   assert.match(bff, /COD_FORBIDDEN/);
   assert.doesNotMatch(bff, /central_stock:\s*req\.body|role:\s*req\.body/);
   assert.match(client, /export const shipmentApi/);
-  assert.match(client, /cashOnDelivery:\s*false/);
-  assert.match(page, /En ucuz otomatik seçilmez/);
+  assert.match(client, /loadGeliverOffers/);
+  assert.match(client, /acceptGeliverOffer/);
+  assert.match(page, /Canlı Geliver teklifleri/);
+  assert.match(page, /En ucuz teklif otomatik seçilmez/);
+  assert.match(page, /İptal et/);
   assert.match(page, /Fiziksel teslimi doğrula/);
+  assert.doesNotMatch(page, /packagesJson|carrierCode|serviceCode|quoteId|providerShipmentId/);
 });
