@@ -18,8 +18,8 @@ test("V2-09 source set declares exact immutable O/P/W/K/L revisions", () => {
   assert.equal(manifest.release, "V2-09");
   const byId = new Map(manifest.repositories.map((entry) => [entry.id, entry]));
   assert.deepEqual(Object.fromEntries(["O", "P", "W", "K", "L"].map((id) => [id, byId.get(id).revision])), {
-    O: "8e0fda083dc9f92de70e74b1b2872b70f7e6af91",
-    P: "1032b63bf78b0a3bcf1a207b85bfb05ade759fc7",
+    O: "6f4ec98d48c8ab5c20f60b6c356d6c8d04d2e012",
+    P: "df8379d82b562a4aab0b9eace4e1d709cfea8932",
     W: "4d33c123441bfc4e571805849385a120c0fb1683",
     K: "2337bd4d86c47e143d3cabaf830a869932bb0968",
     L: "c57d9df0f412dae2c022093f0d7ac8591754edec",
@@ -38,7 +38,9 @@ test("V2-09 records V2-08 as its immutable predecessor closure", () => {
   const currentById = new Map(manifest.repositories.map((entry) => [entry.id, entry]));
   const previousById = new Map(previousManifest.repositories.map((entry) => [entry.id, entry]));
   for (const id of ["W", "K", "L"]) assert.equal(currentById.get(id).revision, previousById.get(id).revision);
-  assert.equal(currentById.get("O").revision, manifest.basedOn.operationsClosureRevision);
+  assert.equal(previousManifest.repositories.find((entry) => entry.id === "P").revision, "941abb1f5d958782a73c2b4731ab4a2f34a2edc7");
+  assert.equal(currentById.get("P").revision, "df8379d82b562a4aab0b9eace4e1d709cfea8932");
+  assert.notEqual(currentById.get("O").revision, manifest.basedOn.operationsClosureRevision);
 });
 
 test("source-set verifier accepts an explicitly selected V2-09 exact revision set", () => {
