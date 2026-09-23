@@ -31,6 +31,9 @@ test("V2-18 CI and E2E are locked to the V2-18 exact source set", () => {
     assert.match(source, /EXPECTED_SOURCE_SET_RELEASE=\$\{EXPECTED_SOURCE_SET_RELEASE:-V2-18\}/);
     assert.match(source, /config\/v2-18-source-set\.json/);
   }
+  const localE2e = fs.readFileSync(path.join(root, "scripts/e2e-local.sh"), "utf8");
+  assert.doesNotMatch(localE2e, /npx -y node@24/, "local E2E must use the repository-native Node ABI");
+  assert.match(localE2e, /NODE24_BIN=\$\{NODE24_BIN:-\$\(command -v node\)\}/);
 
   const verifier = fs.readFileSync(path.join(root, "scripts/verify-source-set.mjs"), "utf8");
   assert.match(verifier, /EXPECTED_SOURCE_SET_RELEASE \|\| "V2-18"/);
