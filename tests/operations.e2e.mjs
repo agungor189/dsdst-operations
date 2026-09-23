@@ -347,6 +347,7 @@ test("DSDST Operations receiving, live template and picking workflow", async () 
         vat_rate_bps: 2_000,
       }],
     },
+    expect: 201,
   });
   assert.ok(sale.payload.id);
   const afterSaleProducts = await request(panelUrl, "/api/products", { cookie: panelCookie });
