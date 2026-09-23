@@ -158,7 +158,22 @@ const collectPorts = (policy, container) => {
   if (runtimePorts === null || typeof runtimePorts !== "object" || Array.isArray(runtimePorts)) {
     fail(`runtime ports are unavailable for ${policy.service_id}`);
   }
-  if (Object.keys(runtimePorts).length !== policy.ports.length) fail(`runtime port count does not match ${policy.service_id}`);
+  const expectedKeys = new Set(
+    policy.ports.map((expected) => `${expected.container_port}/${expected.protocol}`)
+  );
+
+  for (const [key, bindings] of Object.entries(runtimePorts)) {
+    if (expectedKeys.has(key)) continue;
+
+    const unbound =
+      bindings === null ||
+      (Array.isArray(bindings) && bindings.length === 0);
+
+    if (!unbound) {
+      fail(`unexpected runtime port is published for ${policy.service_id}`);
+    }
+  }
+
   return policy.ports.map((expected) => {
     const key = `${expected.container_port}/${expected.protocol}`;
     if (!Object.hasOwn(runtimePorts, key)) fail(`runtime port mapping does not match ${policy.service_id}`);

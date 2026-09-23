@@ -342,3 +342,66 @@ test('bootstrap hydration runs with temporary root privilege and hands state bac
   assert.match(hydrate, /TARGET_GID:\?TARGET_GID is required/);
   assert.match(hydrate, /chown -R "\$\{TARGET_UID\}:\$\{TARGET_GID\}"/);
 });
+
+test('runtime provenance ignores unbound image EXPOSE metadata but rejects unexpected published ports', async () => {
+  const {collectContainerObservations} = await import('../scripts/collect-runtime-provenance.mjs');
+  const {getRuntimeServicePolicies} = await import('../scripts/validate-release-evidence.mjs');
+
+  const policy = getRuntimeServicePolicies()
+    .find((entry) => entry.service_id === 'label-printer');
+
+  const container = {
+    Config: {
+      Env: [
+        'NODE_ENV=production',
+        'PORT=3000',
+        'DATA_DIR=/app/data',
+        'STATE_FILE=app-state.json',
+        'PANEL_API_URL=http://dsdst-panel:3000',
+        'COOKIE_SECURE=false',
+        'TRUST_PROXY_HOPS=0',
+      ],
+    },
+    Mounts: [
+      {
+        Type: 'volume',
+        Source: '/var/lib/docker/volumes/test-label/_data',
+        Destination: '/app/data',
+        RW: true,
+      },
+    ],
+    NetworkSettings: {
+      Networks: {
+        'dsdst-edge': {},
+        'dsdst-internal': {},
+      },
+      Ports: {
+        '3000/tcp': [
+          {HostIp: '127.0.0.1', HostPort: '13013'},
+        ],
+        '3010/tcp': null,
+      },
+    },
+  };
+
+  const schema = {
+    kind: 'json-state',
+    version: '3',
+    evidence_source: 'runtime-collector',
+  };
+
+  const observation = collectContainerObservations(policy, container, schema);
+
+  assert.equal(observation.ports.length, 1);
+  assert.equal(observation.ports[0].container_port, 3000);
+  assert.equal(observation.ports[0].host_ip, '127.0.0.1');
+
+  container.NetworkSettings.Ports['3010/tcp'] = [
+    {HostIp: '127.0.0.1', HostPort: '13999'},
+  ];
+
+  assert.throws(
+    () => collectContainerObservations(policy, container, schema),
+    /unexpected runtime port is published/i,
+  );
+});
