@@ -26,6 +26,18 @@ test("V2-18 CI and E2E are locked to the V2-18 exact source set", () => {
   }
   assert.doesNotMatch(workflow, /config\/v2-06-source-set\.json|2fb0d75b2f035135f976a1c2f61253351904a79f/);
 
+  const ciWorkflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+  assert.match(ciWorkflow, /Checkout Operations with full history[\s\S]*?fetch-depth:\s*0/);
+  assert.match(ciWorkflow, /node scripts\/source-set-workflow-outputs\.mjs config\/v2-18-source-set\.json V2-18/);
+  for (const id of ["P", "W", "K", "L", "HUB"]) {
+    assert.match(ciWorkflow, new RegExp(`steps\\.source-set\\.outputs\\.${id}`), `${id} CI checkout must come from the manifest reader`);
+  }
+  for (const context of ["PANEL_CONTEXT", "WAREHOUSE_CONTEXT", "KIT_STUDIO_CONTEXT", "LABEL_PRINTER_CONTEXT", "CUSTOMER_HUB_CONTEXT"]) {
+    assert.match(ciWorkflow, new RegExp(`${context}: \\$\\{\\{ github\\.workspace \\}\\}/`), `${context} must be wired under the CI workspace`);
+  }
+  assert.match(ciWorkflow, /node scripts\/verify-source-set\.mjs --allow-operations-descendant/);
+  assert.doesNotMatch(ciWorkflow, /[a-f0-9]{40}/, "CI must not duplicate source-set revisions");
+
   for (const script of ["scripts/e2e.sh", "scripts/e2e-local.sh"]) {
     const source = fs.readFileSync(path.join(root, script), "utf8");
     assert.match(source, /EXPECTED_SOURCE_SET_RELEASE=\$\{EXPECTED_SOURCE_SET_RELEASE:-V2-18\}/);

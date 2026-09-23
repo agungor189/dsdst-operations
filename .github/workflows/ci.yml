@@ -11,11 +11,69 @@ permissions:
 jobs:
   orchestration:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dsdst-operations
+    env:
+      OPERATIONS_CONTEXT: ${{ github.workspace }}/dsdst-operations
+      PANEL_CONTEXT: ${{ github.workspace }}/panel-kit-yonetimi
+      WAREHOUSE_CONTEXT: ${{ github.workspace }}/Dsdst-Warehouse
+      KIT_STUDIO_CONTEXT: ${{ github.workspace }}/dsdst-kit-studio
+      LABEL_PRINTER_CONTEXT: ${{ github.workspace }}/Label-Printer
+      CUSTOMER_HUB_CONTEXT: ${{ github.workspace }}/dsdst-customer-hub
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Operations with full history
+        uses: actions/checkout@v4
+        with:
+          path: dsdst-operations
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Read V2-18 exact source set
+        id: source-set
+        run: node scripts/source-set-workflow-outputs.mjs config/v2-18-source-set.json V2-18 >> "$GITHUB_OUTPUT"
+      - name: Checkout exact Panel source
+        uses: actions/checkout@v4
+        with:
+          repository: agungor189/panel-kit-yonetimi
+          ref: ${{ steps.source-set.outputs.P }}
+          path: panel-kit-yonetimi
+          persist-credentials: false
+      - name: Checkout exact Warehouse source
+        uses: actions/checkout@v4
+        with:
+          repository: agungor189/Dsdst-Warehouse
+          ref: ${{ steps.source-set.outputs.W }}
+          path: Dsdst-Warehouse
+          persist-credentials: false
+      - name: Checkout exact Kit Studio source
+        uses: actions/checkout@v4
+        with:
+          repository: agungor189/dsdst-kit-studio
+          ref: ${{ steps.source-set.outputs.K }}
+          path: dsdst-kit-studio
+          persist-credentials: false
+      - name: Checkout exact Label source
+        uses: actions/checkout@v4
+        with:
+          repository: agungor189/Label-Printer
+          ref: ${{ steps.source-set.outputs.L }}
+          path: Label-Printer
+          persist-credentials: false
+      - name: Checkout exact Customer Hub source
+        uses: actions/checkout@v4
+        with:
+          repository: agungor189/dsdst-customer-hub
+          ref: ${{ steps.source-set.outputs.HUB }}
+          path: dsdst-customer-hub
+          persist-credentials: false
+      - name: Verify exact V2-18 source set
+        env:
+          EXPECTED_SOURCE_SET_RELEASE: V2-18
+          SOURCE_SET_MANIFEST: config/v2-18-source-set.json
+        run: node scripts/verify-source-set.mjs --allow-operations-descendant
       - name: Release evidence contract
         run: |
           npm ci --ignore-scripts
@@ -37,7 +95,7 @@ jobs:
       - uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
-          scan-ref: .
+          scan-ref: dsdst-operations
           scanners: misconfig,secret
           severity: CRITICAL,HIGH
           exit-code: "1"
