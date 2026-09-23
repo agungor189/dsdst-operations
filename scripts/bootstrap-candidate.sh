@@ -45,7 +45,10 @@ mkdir -p "$EVIDENCE_DIR"
 EVIDENCE_DIR=$(CDPATH='' && cd -- "$EVIDENCE_DIR" && pwd)
 RUNTIME_EVIDENCE="$EVIDENCE_DIR/runtime-provenance.json"
 SUMMARY_EVIDENCE="$EVIDENCE_DIR/bootstrap-candidate-verification.json"
-[ ! -e "$RUNTIME_EVIDENCE" ] && [ ! -e "$SUMMARY_EVIDENCE" ] || { echo "Bootstrap candidate evidence already exists; refusing overwrite" >&2; exit 2; }
+if [ -e "$RUNTIME_EVIDENCE" ] || [ -e "$SUMMARY_EVIDENCE" ]; then
+  echo "Bootstrap candidate evidence already exists; refusing overwrite" >&2
+  exit 2
+fi
 
 compose() {
   docker compose --project-name "$PROJECT" --env-file "$ENV_FILE" \

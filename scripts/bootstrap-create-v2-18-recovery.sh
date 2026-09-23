@@ -21,7 +21,10 @@ esac
 HMAC_KEY=$(grep '^RECOVERY_MANIFEST_HMAC_KEY=' "$ENV_FILE" | tail -1 | cut -d= -f2-)
 HMAC_KEY_ID=$(grep '^RECOVERY_MANIFEST_HMAC_KEY_ID=' "$ENV_FILE" | tail -1 | cut -d= -f2-)
 TOOLBOX_IMAGE=$(grep '^OPERATIONS_TOOLBOX_IMAGE=' "$ENV_FILE" | tail -1 | cut -d= -f2-)
-[ -n "$HMAC_KEY" ] && [ -n "$TOOLBOX_IMAGE" ] || { echo "Candidate env is missing recovery HMAC key or Operations toolbox image" >&2; exit 2; }
+if [ -z "$HMAC_KEY" ] || [ -z "$TOOLBOX_IMAGE" ]; then
+  echo "Candidate env is missing recovery HMAC key or Operations toolbox image" >&2
+  exit 2
+fi
 export RECOVERY_MANIFEST_HMAC_KEY="$HMAC_KEY"
 [ -z "$HMAC_KEY_ID" ] || export RECOVERY_MANIFEST_HMAC_KEY_ID="$HMAC_KEY_ID"
 unset HMAC_KEY HMAC_KEY_ID
