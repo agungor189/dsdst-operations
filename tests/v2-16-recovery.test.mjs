@@ -75,11 +75,10 @@ function runtimeService(serviceId, revision, schemaKind, schemaVersion) {
   };
 }
 
-function createRecoveryFixture({ createdAt = "2026-09-23T10:00:00.000Z" } = {}) {
+function createRecoveryFixture({ createdAt = "2026-09-23T10:00:00.000Z", sourceSet = null } = {}) {
   const point = path.join(temporaryDirectory(), "rp-20260923T100000Z-fixture");
-  const revisions = {
-    O: "0".repeat(40), P: "1".repeat(40), W: "2".repeat(40), K: "3".repeat(40), L: "4".repeat(40), HUB: "5".repeat(40),
-  };
+  const selectedSourceSet = sourceSet || JSON.parse(fs.readFileSync(new URL("../config/v2-16-source-set.json", import.meta.url), "utf8"));
+  const revisions = Object.fromEntries(selectedSourceSet.repositories.map(({ id, revision }) => [id, revision]));
   createDatabase(path.join(point, "payload/panel/database.sqlite"), 67, 4);
   createDatabase(path.join(point, "payload/kit/database.sqlite"), 10, 3);
   createDatabase(path.join(point, "payload/customer-hub/database.sqlite"), 5, 2);
@@ -88,14 +87,10 @@ function createRecoveryFixture({ createdAt = "2026-09-23T10:00:00.000Z" } = {}) 
   createArchive(path.join(point, "payload/label/state.tar.gz"), { "app-state.json": JSON.stringify({ version: 3, revision: 9, templates: [] }) });
   createArchive(path.join(point, "payload/customer-hub/attachments.tar.gz"), { "2026/a.txt": "hub" });
   fs.mkdirSync(path.join(point, "provenance"), { recursive: true });
-  fs.writeFileSync(path.join(point, "provenance/source-set.json"), JSON.stringify({
-    schemaVersion: "dsdst.test-source-set.v1",
-    release: "V2-16",
-    repositories: Object.entries(revisions).map(([id, revision]) => ({ id, repository: `example/${id}`, revision })),
-  }));
+  fs.writeFileSync(path.join(point, "provenance/source-set.json"), JSON.stringify(selectedSourceSet));
   fs.writeFileSync(path.join(point, "provenance/source-set-observation.json"), JSON.stringify({
     schemaVersion: "dsdst.test-source-set.v1",
-    repositories: Object.entries(revisions).map(([id, revision]) => ({ id, repository: `example/${id}`, revision, role: "release-source" })),
+    repositories: selectedSourceSet.repositories.map(({ id, repository, revision, role }) => ({ id, repository, revision, role: role || "release-source" })),
   }));
   fs.writeFileSync(path.join(point, "provenance/runtime.json"), JSON.stringify({
     provenance_version: 1,
@@ -186,6 +181,27 @@ test("a verified recovery point contains complete P/K/L/Hub state, hashes, schem
   assert.equal(manifest.components.kit_database.schema_version, "10");
   assert.equal(manifest.components.label_state.schema_version, "3");
   assert.equal(verifyRecoveryPoint(point, { manifestKey: MANIFEST_KEY }).verification.state, "VERIFIED");
+});
+
+test("exact V2-18 source-set recovery points build and verify while unsupported or altered sets fail closed", () => {
+  const v218 = JSON.parse(fs.readFileSync(new URL("../config/v2-18-source-set.json", import.meta.url), "utf8"));
+  const recoveryCli = new URL("../scripts/recovery/recovery-cli.mjs", import.meta.url).pathname;
+  const v216Path = new URL("../config/v2-16-source-set.json", import.meta.url).pathname;
+  const v218Path = new URL("../config/v2-18-source-set.json", import.meta.url).pathname;
+  assert.equal(execFileSync(process.execPath, [recoveryCli, "source-set-release", v216Path], {encoding: "utf8"}).trim(), "V2-16");
+  assert.equal(execFileSync(process.execPath, [recoveryCli, "source-set-release", v218Path], {encoding: "utf8"}).trim(), "V2-18");
+  assert.match(fs.readFileSync(new URL("../scripts/backup.sh", import.meta.url), "utf8"), /SOURCE_SET_RELEASE=.*source-set-release/);
+  const fixture = createRecoveryFixture({ sourceSet: v218 });
+  assert.equal(fixture.manifest.provenance.source_set.release, "V2-18");
+  assert.equal(verifyRecoveryPoint(fixture.point, { manifestKey: MANIFEST_KEY }).provenance.source_set.release, "V2-18");
+
+  const altered = structuredClone(v218);
+  altered.repositories.find(({ id }) => id === "P").revision = "f".repeat(40);
+  assert.throws(() => createRecoveryFixture({ sourceSet: altered }), /exact|source-set|revision|V2-18/i);
+
+  const unsupported = structuredClone(v218);
+  unsupported.release = "V2-19";
+  assert.throws(() => createRecoveryFixture({ sourceSet: unsupported }), /unsupported|source-set|V2-19/i);
 });
 
 test("corruption and missing required components are rejected closed", () => {

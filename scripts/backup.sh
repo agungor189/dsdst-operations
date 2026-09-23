@@ -48,7 +48,10 @@ trap cleanup_lock EXIT
 mkdir -p "$PARTIAL/provenance"
 
 PHASE=source-set
-EXPECTED_SOURCE_SET_RELEASE=V2-16 SOURCE_SET_MANIFEST="$SOURCE_SET" \
+if ! SOURCE_SET_RELEASE=$(node --no-warnings "$ROOT_DIR/scripts/recovery/recovery-cli.mjs" source-set-release "$SOURCE_SET"); then
+  record_failure 1
+fi
+EXPECTED_SOURCE_SET_RELEASE="$SOURCE_SET_RELEASE" SOURCE_SET_MANIFEST="$SOURCE_SET" \
   node "$ROOT_DIR/scripts/verify-source-set.mjs" --allow-operations-descendant > "$PARTIAL/provenance/source-set-observation.json" \
   || record_failure 1
 cp "$SOURCE_SET" "$PARTIAL/provenance/source-set.json"

@@ -2,7 +2,12 @@
 
 ## Recovery contract
 
-V2-16 extends the existing `scripts/backup.sh`, `scripts/restore-check.sh`, production Compose, and Panel rclone/R2 configuration. It does not create a second backup authority. O coordinates one recovery point; Panel's existing managed DB/uploads archives remain component-level operator conveniences and are not accepted recovery points by themselves.
+The V2-16 recovery contract remains backward compatible and now has a reviewed V2-18
+profile. `scripts/backup.sh` defaults to V2-16 for existing schedules; an explicit
+`SOURCE_SET_MANIFEST=config/v2-18-source-set.json` selects V2-18. Only the bundled exact
+V2-16 and V2-18 manifests are accepted. O still coordinates one recovery point; Panel's
+existing managed DB/uploads archives remain component-level operator conveniences and
+are not accepted recovery points by themselves.
 
 The locked objectives are:
 
@@ -30,7 +35,7 @@ SQLite files are created with the SQLite online backup API while the live WAL wr
 
 ## Required environment
 
-Use the existing Panel rclone/R2 variables. V2-16 places recovery sets below a separate `recovery-points` prefix:
+Use the existing Panel rclone/R2 variables. Both supported profiles place recovery sets below a separate `recovery-points` prefix:
 
 ```dotenv
 RECOVERY_OFFSITE_ENABLED=true
@@ -51,6 +56,17 @@ Create one full coherent recovery point:
 ```sh
 ./scripts/backup.sh
 ```
+
+Create an exact V2-18 recovery point only from the canonical manifest and verified
+checkouts:
+
+```sh
+SOURCE_SET_MANIFEST=config/v2-18-source-set.json ./scripts/backup.sh
+```
+
+The backup controller derives the expected release from the validated canonical
+manifest. Altered V2-16/V2-18 manifests and unsupported releases fail before snapshot
+creation.
 
 Check the 60-minute RPO health gate:
 
@@ -115,4 +131,4 @@ Failed and incomplete attempts are not called recovery points in good standing a
 
 ## RTO and promotion
 
-The target is recovery within 60 minutes. A drill measures this target; code or backup presence alone does not verify it. Promotion/cutover remains a separate, explicitly authorized operations action after isolated checks, owner review of the recorded RPO gap, and runtime provenance verification. V2-16 contains no promote command.
+The target is recovery within 60 minutes. A drill measures this target; code or backup presence alone does not verify it. Promotion/cutover remains a separate, explicitly authorized operations action after isolated checks, owner review of the recorded RPO gap, and runtime provenance verification. Recovery tooling contains no promote command.

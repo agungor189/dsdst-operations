@@ -4,7 +4,7 @@
 
 Blind in-place deployment was retired by V2-17. `scripts/deploy.sh` now fails closed without changing runtime state. All published host ports are hard-bound to `127.0.0.1`; external access is through the explicitly controlled Cloudflare route.
 
-Use `docs/runtime-release.md`. Production release requires an exact digest-pinned source/image set, manual approval, a fresh accepted V2-16 recovery point, isolated migration preflight, a separate candidate Compose project/volumes/networks/ports, health plus read-only smoke/connectivity checks, and an explicit Cloudflare cutover.
+Use `docs/runtime-release.md`. Production release requires an exact digest-pinned source/image set, manual approval, a fresh accepted recovery point for the selected release profile (exact V2-18 for V2-18), isolated migration preflight, a separate candidate Compose project/volumes/networks/ports, health plus read-only smoke/connectivity checks, and an explicit Cloudflare cutover.
 
 ## Upgrades and rollback
 

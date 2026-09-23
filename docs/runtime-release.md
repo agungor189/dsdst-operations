@@ -1,6 +1,10 @@
 # Runtime release and rollback
 
-This runbook is the V2-17 operator contract. It prepares commands; repository tests do not deploy, restart, migrate, restore production, or call Cloudflare.
+This runbook is the versioned runtime-release operator contract. The controller accepts
+the exact historical V2-17 profile and the exact V2-18 profile; it rejects every other
+release/source-set combination. The commands below show the current V2-18 profile. They
+prepare controlled operations; repository tests do not deploy, restart, migrate, restore
+production, or call Cloudflare.
 
 ## State model
 
@@ -18,10 +22,10 @@ The journal is append-only and external to protected databases. Store it in an a
 
 Create a release-plan JSON from runtime-derived evidence. It must contain:
 
-- `release_id`, `release: V2-17`, `prepared_at`, and `recovery_max_age_seconds` at or below 3600;
-- the exact `config/v2-17-source-set.json` revisions and accepted V2-16 content/closure revisions;
+- `release_id`, `release: V2-18`, `prepared_at`, and `recovery_max_age_seconds` at or below 3600;
+- the exact `config/v2-18-source-set.json` revisions and `accepted_v2_17_source_set` content/closure revisions;
 - six service records with repository, OCI revision, digest-pinned image reference, image ID, and redacted config fingerprint;
-- an accepted, restore-tested V2-16 recovery point and exact source set;
+- an accepted, restore-tested exact V2-18 recovery point and source set;
 - old runtime identity/route/volume IDs and distinct candidate project/route/volume IDs;
 - only `127.0.0.1` candidate bindings;
 - verified Cloudflare route hash/current target plus the fixed cutover/rollback command names;
@@ -31,32 +35,32 @@ Prepare:
 
 ```sh
 node scripts/release/release-cli.mjs prepare \
-  /approved/release-evidence/v2-17.ndjson \
-  /approved/release-input/v2-17-plan.redacted.json
+  /approved/release-evidence/v2-18.ndjson \
+  /approved/release-input/v2-18-plan.redacted.json
 ```
 
 An authorized human reviews the plan hash, then supplies redacted approval JSON with `approved_by`, `approval_id`, the exact `plan_hash`, and `manual: true`:
 
 ```sh
 node scripts/release/release-cli.mjs approve \
-  /approved/release-evidence/v2-17.ndjson \
-  /approved/release-input/v2-17-approval.redacted.json
+  /approved/release-evidence/v2-18.ndjson \
+  /approved/release-input/v2-18-approval.redacted.json
 ```
 
 No approval means the next transition is rejected.
 
 ## 2. Recovery and migration preflight
 
-The migration adapter is repository/venue-specific and must emit the complete redacted preflight payload: `backup_id`, all four `PASS` checks, and `migration: {status: PASS, candidate_db_touched: false, migrations: [...]}`. The wrapper first verifies current recovery health, restores V2-16 into an isolated path, and only then invokes the adapter. It cannot start the candidate.
+The migration adapter is repository/venue-specific and must emit the complete redacted preflight payload: `backup_id`, all four `PASS` checks, and `migration: {status: PASS, candidate_db_touched: false, migrations: [...]}`. The wrapper first verifies current recovery health, restores the release profile's approved recovery point into an isolated path, and only then invokes the adapter. For V2-18 that point must carry the exact V2-18 source set. It cannot start the candidate.
 
 ```sh
 RECOVERY_MANIFEST_HMAC_KEY=<from-secret-store> \
 ./scripts/release/migration-preflight.sh \
-  /approved/release-evidence/v2-17.ndjson \
+  /approved/release-evidence/v2-18.ndjson \
   /opt/dsdst/backups/recovery-points/rp-... \
-  /opt/dsdst/backups/restore-staging/v2-17-preflight \
+  /opt/dsdst/backups/restore-staging/v2-18-preflight \
   /approved/adapters/dsdst-migration-preflight \
-  /approved/release-evidence/v2-17-preflight-result.json
+  /approved/release-evidence/v2-18-preflight-result.json
 ```
 
 Failure leaves the release before `PREFLIGHT_PASSED`; do not create or mount candidate DB volumes.
@@ -68,31 +72,31 @@ Create a protected candidate environment file. All six application/toolbox image
 Validate and pull without builds:
 
 ```sh
-./scripts/release/candidate-stack.sh config /approved/release-evidence/v2-17.ndjson /approved/secrets/v2-17-candidate.env
-./scripts/release/candidate-stack.sh pull   /approved/release-evidence/v2-17.ndjson /approved/secrets/v2-17-candidate.env
+./scripts/release/candidate-stack.sh config /approved/release-evidence/v2-18.ndjson /approved/secrets/v2-18-candidate.env
+./scripts/release/candidate-stack.sh pull   /approved/release-evidence/v2-18.ndjson /approved/secrets/v2-18-candidate.env
 ```
 
 Hydrate only the separate candidate volumes from the already verified isolated restore for pre-verification. This recovery point remains mandatory protection evidence, but it is never the normal-cutover business-data source. The approved adapter runs candidate pre-verification migrations and is forbidden from mounting old production volumes:
 
 ```sh
 ./scripts/release/hydrate-candidate.sh \
-  /approved/release-evidence/v2-17.ndjson \
-  /approved/secrets/v2-17-candidate.env \
-  /opt/dsdst/backups/restore-staging/v2-17-preflight \
+  /approved/release-evidence/v2-18.ndjson \
+  /approved/secrets/v2-18-candidate.env \
+  /opt/dsdst/backups/restore-staging/v2-18-preflight \
   /approved/adapters/dsdst-candidate-hydration \
-  /approved/release-evidence/v2-17-hydration.redacted.json
+  /approved/release-evidence/v2-18-hydration.redacted.json
 
 ./scripts/release/candidate-stack.sh up \
-  /approved/release-evidence/v2-17.ndjson \
-  /approved/secrets/v2-17-candidate.env
+  /approved/release-evidence/v2-18.ndjson \
+  /approved/secrets/v2-18-candidate.env
 ```
 
 The overlay assigns separate named volumes and networks and hard-binds published ports to loopback. Collect candidate provenance read-only. Record `CANDIDATE_UP` with the pre-verification hydration result, exact migrations, collector capture ID, all six exact source/image/config/container observations, actual volume source identities, and observed loopback bindings. Operator-supplied freeze timestamps are forbidden:
 
 ```sh
 node scripts/release/release-cli.mjs candidate-up \
-  /approved/release-evidence/v2-17.ndjson \
-  /approved/release-evidence/v2-17-candidate-runtime.redacted.json
+  /approved/release-evidence/v2-18.ndjson \
+  /approved/release-evidence/v2-18-candidate-runtime.redacted.json
 ```
 
 Any observed old volume identity, source/image mismatch, missing config fingerprint, wrong host binding, or L/renderer state-source mismatch is rejected.
@@ -102,15 +106,15 @@ Any observed old volume identity, source/image mismatch, missing config fingerpr
 Run critical health checks:
 
 ```sh
-./scripts/release/candidate-stack.sh health /approved/release-evidence/v2-17.ndjson /approved/secrets/v2-17-candidate.env
+./scripts/release/candidate-stack.sh health /approved/release-evidence/v2-18.ndjson /approved/secrets/v2-18-candidate.env
 ```
 
 Run the approved read-only smoke and connectivity adapter. The evidence payload must cover all six services, use `smoke.mode: READ_ONLY`, show `PASS` for smoke/connectivity/provenance, and enumerate cross-service checks. Then record:
 
 ```sh
 node scripts/release/release-cli.mjs verify \
-  /approved/release-evidence/v2-17.ndjson \
-  /approved/release-evidence/v2-17-verification.redacted.json
+  /approved/release-evidence/v2-18.ndjson \
+  /approved/release-evidence/v2-18-verification.redacted.json
 ```
 
 A failed or missing check never reaches `VERIFIED` and therefore cannot begin convergence or cut over.
@@ -128,7 +132,7 @@ DSDST_RUNTIME_SWITCH_ADAPTER=/approved/adapters/dsdst-runtime-switch \
 DSDST_FINAL_SNAPSHOT_ADAPTER=/approved/adapters/dsdst-final-snapshot \
 DSDST_FINAL_HYDRATION_ADAPTER=/approved/adapters/dsdst-final-hydration \
 node scripts/release/final-convergence.mjs \
-  /approved/release-evidence/v2-17.ndjson
+  /approved/release-evidence/v2-18.ndjson
 ```
 
 If any pre-route step fails after freeze, the controller resumes the old writer, disables candidate writes, verifies the route is still the old target, and records `FAILED`. The candidate remains non-authoritative.
@@ -141,7 +145,7 @@ CLOUDFLARE_ROUTE_ID=<from-protected-config> \
 CLOUDFLARE_ROUTE_ADAPTER=/approved/adapters/dsdst-cloudflare-route \
 DSDST_RUNTIME_SWITCH_ADAPTER=/approved/adapters/dsdst-runtime-switch \
 node scripts/release/cloudflare-route.mjs abort \
-  /approved/release-evidence/v2-17.ndjson
+  /approved/release-evidence/v2-18.ndjson
 ```
 
 ## 6. Explicit Cloudflare cutover
@@ -149,7 +153,7 @@ node scripts/release/cloudflare-route.mjs abort \
 Review the commands without mutation:
 
 ```sh
-node scripts/release/cloudflare-route.mjs plan /approved/release-evidence/v2-17.ndjson
+node scripts/release/cloudflare-route.mjs plan /approved/release-evidence/v2-18.ndjson
 ```
 
 The controller first fsyncs a `ROUTE_INTENT` containing a stable `operation_id`, action, expected/desired targets, old/new runtime identities, freeze/final-snapshot references, watermarks, and deadline. Only then may the Cloudflare adapter receive `apply --operation-id ...`; the adapter must make that operation idempotent and reconcilable. The controller never trusts a mutation return value as success: it calls `observe --operation-id ...` and records only the verified actual target. The runtime adapter must confirm exactly one authoritative writer for that observed target. Both adapter paths must be absolute. Cutover is the only route-mutating release command:
@@ -159,7 +163,7 @@ CLOUDFLARE_ROUTE_ID=<from-protected-config> \
 CLOUDFLARE_ROUTE_ADAPTER=/approved/adapters/dsdst-cloudflare-route \
 DSDST_RUNTIME_SWITCH_ADAPTER=/approved/adapters/dsdst-runtime-switch \
 node scripts/release/cloudflare-route.mjs cutover \
-  /approved/release-evidence/v2-17.ndjson
+  /approved/release-evidence/v2-18.ndjson
 ```
 
 The controller measures from production write freeze, not from the later route command. It records the adapter's durable operation-applied timestamp separately from the later observation time, plus the approval ID, operation ID, and old/new runtime identities. On timeout, error, or restart it reconciles before any retry. A `PENDING` adapter operation remains unresolved and cannot be retried or classified until a later observation is terminal. Candidate target plus `APPLIED` means it records `CUTOVER` without a second mutation; old target plus `NOT_APPLIED`/`FAILED` means it resumes only the old writer and records `CUTOVER_ABORTED`; any third or contradictory target fences both writers and records `ROUTE_UNCERTAIN`. A target already changed before a newly persisted operation is also treated as uncertain, never fabricated as this operation's success.
@@ -171,7 +175,7 @@ DSDST_RUNTIME_SWITCH_ADAPTER=/approved/adapters/dsdst-runtime-switch \
 CLOUDFLARE_ROUTE_ID=<from-protected-config> \
 CLOUDFLARE_ROUTE_ADAPTER=/approved/adapters/dsdst-cloudflare-route \
 node scripts/release/cloudflare-route.mjs complete \
-  /approved/release-evidence/v2-17.ndjson
+  /approved/release-evidence/v2-18.ndjson
 ```
 
 ## 7. Deterministic, data-safe rollback
@@ -184,7 +188,7 @@ CLOUDFLARE_ROUTE_ID=<from-protected-config> \
 CLOUDFLARE_ROUTE_ADAPTER=/approved/adapters/dsdst-cloudflare-route \
 DSDST_RUNTIME_SWITCH_ADAPTER=/approved/adapters/dsdst-runtime-switch \
 node scripts/release/cloudflare-route.mjs rollback \
-  /approved/release-evidence/v2-17.ndjson
+  /approved/release-evidence/v2-18.ndjson
 ```
 
 Retain the previous volume identities and stopped/read-only runtime for seven full days after cutover. Do not describe them as a data-safe rollback state without one of the proofs above. Deletion is a separately approved retention operation and is not implemented by this release command.
@@ -193,8 +197,8 @@ Retain the previous volume identities and stopped/read-only runtime for seven fu
 
 ```sh
 node scripts/release/release-cli.mjs report \
-  /approved/release-evidence/v2-17.ndjson \
-  > /approved/release-evidence/v2-17-report.redacted.json
+  /approved/release-evidence/v2-18.ndjson \
+  > /approved/release-evidence/v2-18-report.redacted.json
 ```
 
 The report is a projection of the verified journal, not a new authority. It includes the actual freeze token/time/runtime, final snapshot ID and component hashes, source and candidate watermarks, final hydration snapshot, post-hydration migrations, final runtime/schema/data checks, every route intent/outcome operation ID and target observation, and rollback zero-write or synchronization proof. Preserve the NDJSON journal and adapter evidence. Re-running `report` detects journal tampering.

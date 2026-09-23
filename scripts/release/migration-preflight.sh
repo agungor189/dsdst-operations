@@ -9,7 +9,7 @@ MIGRATION_ADAPTER=${4:-}
 EVIDENCE_OUTPUT=${5:-}
 
 if [ -z "$JOURNAL" ] || [ -z "$RECOVERY_POINT" ] || [ -z "$ISOLATED_TARGET" ] || [ -z "$MIGRATION_ADAPTER" ] || [ -z "$EVIDENCE_OUTPUT" ]; then
-  echo "Usage: $0 <journal> <V2-16-recovery-point> <isolated-target> <migration-adapter> <evidence-output>" >&2
+  echo "Usage: $0 <journal> <approved-release-recovery-point> <isolated-target> <migration-adapter> <evidence-output>" >&2
   exit 2
 fi
 [ ! -e "$EVIDENCE_OUTPUT" ] || { echo "Evidence output already exists; refusing overwrite" >&2; exit 2; }

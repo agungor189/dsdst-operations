@@ -20,6 +20,7 @@ import {
   signRecoveryManifest,
   stageFinalRecoveryManifest,
   verifyManifestIntegrity,
+  validateRecoverySourceSet,
   verifyRecoveryPoint,
 } from "./recovery-lib.mjs";
 
@@ -81,7 +82,10 @@ function immutableImageReference(service) {
 const [command, ...args] = process.argv.slice(2);
 
 try {
-  if (command === "build") {
+  if (command === "source-set-release") {
+    const sourceSet = validateRecoverySourceSet(JSON.parse(fs.readFileSync(path.resolve(args[0]), "utf8")));
+    process.stdout.write(`${sourceSet.release}\n`);
+  } else if (command === "build") {
     const [pointPath, recoveryPointId, createdAt, completedAt, offsiteEnabled = "false"] = args;
     writeJson(buildRecoveryManifest(path.resolve(pointPath), {
       recoveryPointId,
@@ -232,7 +236,7 @@ try {
     writeJson(evidence);
     if (evidence.result !== "SUCCESS") process.exitCode = 1;
   } else {
-    throw new Error("Usage: recovery-cli.mjs <build|verify|verify-manifest-file|restore|stage-offsite-final|promote-offsite-final|finalize|offsite-failed|record-failure|health|point-health|latest-success|image-env|retention-plan|retention-offsite-location|retention-offsite-config-fingerprint|retention-delete|drill-evidence> ...");
+    throw new Error("Usage: recovery-cli.mjs <source-set-release|build|verify|verify-manifest-file|restore|stage-offsite-final|promote-offsite-final|finalize|offsite-failed|record-failure|health|point-health|latest-success|image-env|retention-plan|retention-offsite-location|retention-offsite-config-fingerprint|retention-delete|drill-evidence> ...");
   }
 } catch (error) {
   console.error(error.message);

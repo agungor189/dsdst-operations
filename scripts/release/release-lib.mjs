@@ -22,19 +22,35 @@ const COMPONENT_REPOSITORIES = Object.freeze({
   L: "agungor189/Label-Printer",
   HUB: "agungor189/dsdst-customer-hub",
 });
+const SOURCE_SET_IDS = Object.freeze(["O", "P", "W", "K", "L", "HUB"]);
+const ACCEPTED_V2_16_MANIFEST = JSON.parse(fs.readFileSync(new URL("../../config/v2-16-source-set.json", import.meta.url), "utf8"));
+const ACCEPTED_V2_17 = JSON.parse(fs.readFileSync(new URL("../../config/v2-17-source-set.json", import.meta.url), "utf8"));
+const ACCEPTED_V2_18 = JSON.parse(fs.readFileSync(new URL("../../config/v2-18-source-set.json", import.meta.url), "utf8"));
+
+const manifestRevisions = (manifest) => Object.freeze(Object.fromEntries(manifest.repositories.map(({id, revision}) => [id, revision])));
 const ACCEPTED_V2_16 = Object.freeze({
-  content: "3547b73951d0ac0781eedff538fa4bbb2e4fc204",
-  closure: "e64142f18eb6a2c3fe7c0f084a393c0871c76ee6",
-  repositories: Object.freeze({
-    O: "3547b73951d0ac0781eedff538fa4bbb2e4fc204",
-    P: "61ed1ad8fba25ed9d5c0b228308ff22da45febaf",
-    W: "525e18c508c1191c0c4e4b725bda00defd930d2f",
-    K: "0e0717c3f8d3f3f0af186b4c165524bc2e81724c",
-    L: "add3987e0eb15e8742ecac490b5eb4e78b620ce5",
-    HUB: "f030c29b6ee41765289993fda1e94d1e484b5cac",
+  content: manifestRevisions(ACCEPTED_V2_16_MANIFEST).O,
+  closure: ACCEPTED_V2_17.basedOn.operationsClosureRevision,
+  repositories: manifestRevisions(ACCEPTED_V2_16_MANIFEST),
+});
+const RELEASE_PROFILES = Object.freeze({
+  "V2-17": Object.freeze({
+    sourceSet: ACCEPTED_V2_17,
+    acceptedField: "accepted_v2_16_source_set",
+    acceptedRelease: "V2-16",
+    acceptedSourceSet: ACCEPTED_V2_16_MANIFEST,
+    acceptedClosure: ACCEPTED_V2_17.basedOn.operationsClosureRevision,
+    recoverySourceSet: ACCEPTED_V2_16_MANIFEST,
+  }),
+  "V2-18": Object.freeze({
+    sourceSet: ACCEPTED_V2_18,
+    acceptedField: "accepted_v2_17_source_set",
+    acceptedRelease: "V2-17",
+    acceptedSourceSet: ACCEPTED_V2_17,
+    acceptedClosure: ACCEPTED_V2_18.basedOn.operationsClosureRevision,
+    recoverySourceSet: ACCEPTED_V2_18,
   }),
 });
-const ACCEPTED_V2_17 = JSON.parse(fs.readFileSync(new URL("../../config/v2-17-source-set.json", import.meta.url), "utf8"));
 
 const fail = (message) => {
   throw new Error(message);
@@ -174,10 +190,10 @@ function revisionMap(sourceSet, label) {
     if (Object.hasOwn(result, id)) fail(`${label} contains duplicate repository ${id}`);
     result[id] = sha(entry.revision, `${label}.${id}.revision`);
   }
-  for (const id of Object.keys(ACCEPTED_V2_16.repositories)) {
+  for (const id of SOURCE_SET_IDS) {
     if (!result[id]) fail(`${label} is missing ${id}`);
   }
-  if (Object.keys(result).length !== Object.keys(ACCEPTED_V2_16.repositories).length) fail(`${label} must contain the exact O/P/W/K/L/HUB source set`);
+  if (Object.keys(result).length !== SOURCE_SET_IDS.length) fail(`${label} must contain the exact O/P/W/K/L/HUB source set`);
   return result;
 }
 
@@ -187,28 +203,39 @@ function sameRevisionMap(actual, expected, label) {
   }
 }
 
-function validateV216(plan) {
-  const accepted = object(plan.accepted_v2_16_source_set, "accepted_v2_16_source_set");
-  if (accepted.release !== "V2-16") fail("accepted source set must identify V2-16");
-  if (accepted.operations_content_revision !== ACCEPTED_V2_16.content) fail("V2-16 accepted content revision mismatch");
-  if (accepted.operations_closure_revision !== ACCEPTED_V2_16.closure) fail("V2-16 accepted closure revision mismatch");
-  sameRevisionMap(revisionMap(accepted, "accepted_v2_16_source_set"), ACCEPTED_V2_16.repositories, "accepted V2-16 source set");
+function releaseProfile(release) {
+  const profile = RELEASE_PROFILES[release];
+  if (!profile) fail(`unsupported release profile: ${release}`);
+  return profile;
+}
+
+function validateAcceptedSourceSet(plan, profile) {
+  const label = profile.acceptedField;
+  const accepted = object(plan[label], label);
+  const expected = manifestRevisions(profile.acceptedSourceSet);
+  if (accepted.release !== profile.acceptedRelease) fail(`accepted source set must identify ${profile.acceptedRelease}`);
+  if (accepted.operations_content_revision !== expected.O) fail(`${profile.acceptedRelease} accepted content revision mismatch`);
+  if (accepted.operations_closure_revision !== profile.acceptedClosure) fail(`${profile.acceptedRelease} accepted closure revision mismatch`);
+  sameRevisionMap(revisionMap(accepted, label), expected, `accepted ${profile.acceptedRelease} source set`);
 }
 
 function validateRecovery(plan, at) {
+  const profile = releaseProfile(plan.release);
+  const expectedRelease = profile.recoverySourceSet.release;
+  const expectedRevisions = manifestRevisions(profile.recoverySourceSet);
   const recovery = object(plan.recovery_point, "recovery_point");
   exactKeys(recovery, ["recovery_point_id", "created_at", "status", "verification_state", "offsite_state", "restored_drill_state", "source_release", "source_repositories"], "recovery_point");
   string(recovery.recovery_point_id, "recovery_point.recovery_point_id");
   if (recovery.status !== "SUCCESS" || recovery.verification_state !== "VERIFIED" || recovery.offsite_state !== "PERSISTED" || recovery.restored_drill_state !== "VERIFIED") {
-    fail("V2-16 recovery point must be SUCCESS, VERIFIED, offsite PERSISTED, and restore-drill VERIFIED");
+    fail(`${expectedRelease} recovery point must be SUCCESS, VERIFIED, offsite PERSISTED, and restore-drill VERIFIED`);
   }
-  if (recovery.source_release !== "V2-16") fail("recovery point must identify V2-16");
+  if (recovery.source_release !== expectedRelease) fail(`recovery point must identify ${expectedRelease}`);
   const maximumAge = plan.recovery_max_age_seconds;
-  if (!Number.isInteger(maximumAge) || maximumAge <= 0 || maximumAge > 3600) fail("recovery_max_age_seconds must be explicitly approved and cannot exceed the accepted V2-16 60-minute RPO");
+  if (!Number.isInteger(maximumAge) || maximumAge <= 0 || maximumAge > 3600) fail(`recovery_max_age_seconds must be explicitly approved and cannot exceed the accepted ${expectedRelease} 60-minute RPO`);
   const createdAt = iso(recovery.created_at, "recovery_point.created_at");
   const checkedAt = iso(at, "recovery freshness check time");
-  if (createdAt > checkedAt || checkedAt - createdAt > maximumAge * 1000) fail("V2-16 recovery point is stale; freshness gate failed");
-  sameRevisionMap(revisionMap({repositories: recovery.source_repositories}, "recovery_point.source_repositories"), ACCEPTED_V2_16.repositories, "recovery point source set");
+  if (createdAt > checkedAt || checkedAt - createdAt > maximumAge * 1000) fail(`${expectedRelease} recovery point is stale; freshness gate failed`);
+  sameRevisionMap(revisionMap({repositories: recovery.source_repositories}, "recovery_point.source_repositories"), expectedRevisions, "recovery point source set");
 }
 
 function validateServices(plan, sources) {
@@ -272,16 +299,16 @@ function validateRoute(plan) {
 
 function validatePlan(plan) {
   object(plan, "release plan");
-  exactKeys(plan, ["release_id", "release", "prepared_at", "recovery_max_age_seconds", "source_set", "accepted_v2_16_source_set", "services", "recovery_point", "old_runtime", "candidate", "route", "rollback"], "release plan");
   assertNoSensitiveKeys(plan, "release plan");
   if (!RELEASE_ID.test(string(plan.release_id, "release_id"))) fail("invalid release_id");
-  if (plan.release !== "V2-17") fail("release must be V2-17");
+  const profile = releaseProfile(string(plan.release, "release"));
+  exactKeys(plan, ["release_id", "release", "prepared_at", "recovery_max_age_seconds", "source_set", profile.acceptedField, "services", "recovery_point", "old_runtime", "candidate", "route", "rollback"], "release plan");
   iso(plan.prepared_at, "prepared_at");
-  validateV216(plan);
+  validateAcceptedSourceSet(plan, profile);
   const sourceSet = object(plan.source_set, "source_set");
-  if (sourceSet.release !== "V2-17") fail("source_set must identify V2-17");
+  if (sourceSet.release !== plan.release) fail(`source_set must identify ${plan.release}`);
   const sources = revisionMap(sourceSet, "source_set");
-  sameRevisionMap(sources, revisionMap(ACCEPTED_V2_17, "config/v2-17-source-set.json"), "V2-17 source set");
+  sameRevisionMap(sources, revisionMap(profile.sourceSet, `config/${plan.release.toLowerCase()}-source-set.json`), `${plan.release} source set`);
   validateServices(plan, sources);
   validateRecovery(plan, plan.prepared_at);
   validateTopology(plan);

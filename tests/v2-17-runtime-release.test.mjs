@@ -116,6 +116,33 @@ function releasePlan(overrides = {}) {
   };
 }
 
+function v218ReleasePlan(overrides = {}) {
+  const plan = releasePlan();
+  const v217 = JSON.parse(fs.readFileSync(new URL("../config/v2-17-source-set.json", import.meta.url), "utf8"));
+  const v218 = JSON.parse(fs.readFileSync(new URL("../config/v2-18-source-set.json", import.meta.url), "utf8"));
+  const v217Revisions = Object.fromEntries(v217.repositories.map(({id, revision}) => [id, revision]));
+  const v218Revisions = Object.fromEntries(v218.repositories.map(({id, revision}) => [id, revision]));
+  plan.release_id = "v2-18-20260923t120000z";
+  plan.release = "V2-18";
+  plan.source_set = {release: "V2-18", repositories: v218.repositories.map(({id, revision}) => ({id, revision}))};
+  delete plan.accepted_v2_16_source_set;
+  plan.accepted_v2_17_source_set = {
+    release: "V2-17",
+    operations_content_revision: v217Revisions.O,
+    operations_closure_revision: v218.basedOn.operationsClosureRevision,
+    repositories: v217.repositories.map(({id, revision}) => ({id, revision})),
+  };
+  for (const service of plan.services) service.source_revision = v218Revisions[service.component];
+  plan.recovery_point = {
+    ...plan.recovery_point,
+    recovery_point_id: "rp-v2-18-fixture",
+    source_release: "V2-18",
+    source_repositories: v218.repositories.map(({id, revision}) => ({id, revision})),
+  };
+  plan.candidate.project = "dsdst-candidate-v2-18-20260923t120000z";
+  return {...plan, ...overrides};
+}
+
 function append(journal, type, payload, occurredAt) {
   return appendReleaseEvent(journal, {type, occurred_at: occurredAt, payload});
 }
@@ -124,9 +151,9 @@ function approvalPayload(planHash) {
   return {approved_by: "operator-17", approval_id: "approval-17", plan_hash: planHash, manual: true};
 }
 
-function preflightPayload() {
+function preflightPayload(plan = releasePlan()) {
   return {
-    backup_id: "rp-v2-16-fixture",
+    backup_id: plan.recovery_point.recovery_point_id,
     recovery_health: "PASS",
     source_set_check: "PASS",
     image_provenance_check: "PASS",
@@ -135,8 +162,7 @@ function preflightPayload() {
   };
 }
 
-function candidatePayload() {
-  const plan = releasePlan();
+function candidatePayload(plan = releasePlan()) {
   const volumeByService = {
     "dsdst-panel": ["candidate-panel"],
     "dsdst-warehouse": [],
@@ -166,13 +192,13 @@ function candidatePayload() {
   const captureId = createRuntimeCaptureId(capturedAt, records);
   records.forEach((record) => { record.capture_id = captureId; });
   return {
-    project: "dsdst-candidate-v2-17-20260923t120000z",
+    project: plan.candidate.project,
     runtime_identity: captureId,
     volume_ids: ["candidate-panel", "candidate-kit", "candidate-label", "candidate-hub"],
     host_bindings: ["127.0.0.1:13000", "127.0.0.1:13006", "127.0.0.1:13012", "127.0.0.1:13100", "127.0.0.1:13013"],
     hydration: {
       status: "PASS",
-      backup_id: "rp-v2-16-fixture",
+      backup_id: plan.recovery_point.recovery_point_id,
       source_isolated_restore: true,
       old_volume_mounted: false,
       migrations_ran: ["panel:81->81", "kit:10->10", "hub:5->5"],
@@ -186,8 +212,8 @@ function candidatePayload() {
   };
 }
 
-function verificationPayload(overrides = {}) {
-  const runtimeIdentity = candidatePayload().runtime_identity;
+function verificationPayload(overrides = {}, plan = releasePlan()) {
+  const runtimeIdentity = candidatePayload(plan).runtime_identity;
   return {
     critical_services: Object.keys(SERVICE_COMPONENTS).map((service_id) => ({service_id, status: "PASS"})),
     smoke: {status: "PASS", mode: "READ_ONLY"},
@@ -198,12 +224,12 @@ function verificationPayload(overrides = {}) {
   };
 }
 
-function advanceToVerified(journal) {
-  const prepared = prepareRelease(journal, releasePlan());
+function advanceToVerified(journal, plan = releasePlan()) {
+  const prepared = prepareRelease(journal, plan);
   append(journal, "APPROVE", approvalPayload(prepared.plan_hash), "2026-09-23T12:01:00.000Z");
-  append(journal, "PREFLIGHT_PASS", preflightPayload(), "2026-09-23T12:02:00.000Z");
-  append(journal, "CANDIDATE_UP", candidatePayload(), "2026-09-23T12:03:00.000Z");
-  append(journal, "VERIFY", verificationPayload(), "2026-09-23T12:04:00.000Z");
+  append(journal, "PREFLIGHT_PASS", preflightPayload(plan), "2026-09-23T12:02:00.000Z");
+  append(journal, "CANDIDATE_UP", candidatePayload(plan), "2026-09-23T12:03:00.000Z");
+  append(journal, "VERIFY", verificationPayload({}, plan), "2026-09-23T12:04:00.000Z");
 }
 
 function freezePayload(overrides = {}) {
@@ -219,7 +245,7 @@ function freezePayload(overrides = {}) {
   return {runtime_adapter: "dsdst-runtime-switch-v1", adapter_evidence: {...body, evidence_digest: createEvidenceDigest(body)}};
 }
 
-function finalConvergencePayload(overrides = {}) {
+function finalConvergencePayload(overrides = {}, plan = releasePlan()) {
   const components = [
     ["P_DB", "sqlite", "online-sqlite-backup", "1"],
     ["P_UPLOADS", "files", "frozen-filesystem-snapshot", "2"],
@@ -230,7 +256,7 @@ function finalConvergencePayload(overrides = {}) {
     ["HUB_ATTACHMENTS", "files", "frozen-filesystem-snapshot", "7"],
   ].map(([authority, kind, capture_method, digit]) => ({authority, kind, capture_method, content_hash: `sha256:${digit.repeat(64)}`}));
   const snapshotBody = {snapshot_id: "cutover-snapshot-1042", created_at: "2026-09-23T12:05:20.000Z", source_data_watermark: "canonical-write-1042", status: "VERIFIED", components};
-  const initial = candidatePayload().runtime_provenance;
+  const initial = candidatePayload(plan).runtime_provenance;
   const capturedAt = "2026-09-23T12:06:30.000Z";
   const records = structuredClone(initial.services);
   records.forEach((record) => { record.capture_id = "runtime-pending"; });
@@ -253,21 +279,21 @@ function finalConvergencePayload(overrides = {}) {
   };
 }
 
-function advanceToConverged(journal) {
-  advanceToVerified(journal);
+function advanceToConverged(journal, plan = releasePlan()) {
+  advanceToVerified(journal, plan);
   append(journal, "FREEZE", freezePayload(), "2026-09-23T12:05:10.000Z");
-  append(journal, "FINAL_CONVERGENCE", finalConvergencePayload(), "2026-09-23T12:06:40.000Z");
+  append(journal, "FINAL_CONVERGENCE", finalConvergencePayload({}, plan), "2026-09-23T12:06:40.000Z");
 }
 
-function routeIntentPayload(action, overrides = {}) {
+function routeIntentPayload(action, overrides = {}, plan = releasePlan()) {
   const rollback = action === "ROLLBACK";
   const body = {
-    release_id: "v2-17-20260923t120000z",
+    release_id: plan.release_id,
     action,
-    expected_target: rollback ? "http://127.0.0.1:13000" : "http://127.0.0.1:3000",
-    desired_target: rollback ? "http://127.0.0.1:3000" : "http://127.0.0.1:13000",
+    expected_target: rollback ? plan.candidate.route_target : plan.old_runtime.route_target,
+    desired_target: rollback ? plan.old_runtime.route_target : plan.candidate.route_target,
     old_runtime_identity: OLD_RUNTIME,
-    new_runtime_identity: finalConvergencePayload().final_candidate.runtime_identity,
+    new_runtime_identity: finalConvergencePayload({}, plan).final_candidate.runtime_identity,
     freeze_token: "freeze-runtime-0001",
     final_snapshot_id: "cutover-snapshot-1042",
     started_at: rollback ? "2026-09-23T12:08:00.000Z" : "2026-09-23T12:05:00.000Z",
@@ -284,18 +310,18 @@ function routeObservation(intent, target, observedAt) {
   return {...body, evidence_digest: createEvidenceDigest(body)};
 }
 
-function authorityEvidence(intent, oldAuthoritative, candidateAuthoritative) {
-  const body = {operation_id: intent.operation_id, old_runtime_identity: OLD_RUNTIME, candidate_runtime_identity: finalConvergencePayload().final_candidate.runtime_identity, old_authoritative: oldAuthoritative, candidate_authoritative: candidateAuthoritative};
+function authorityEvidence(intent, oldAuthoritative, candidateAuthoritative, plan = releasePlan()) {
+  const body = {operation_id: intent.operation_id, old_runtime_identity: OLD_RUNTIME, candidate_runtime_identity: finalConvergencePayload({}, plan).final_candidate.runtime_identity, old_authoritative: oldAuthoritative, candidate_authoritative: candidateAuthoritative};
   return {...body, evidence_digest: createEvidenceDigest(body)};
 }
 
-function cutoverPayload(intent, overrides = {}) {
+function cutoverPayload(intent, overrides = {}, plan = releasePlan()) {
   return {
     operation_id: intent.operation_id, explicit: true, approval_id: "approval-17", route_provenance_state: "VERIFIED",
     route_observation: routeObservation(intent, intent.desired_target, "2026-09-23T12:07:00.000Z"),
-    authority_evidence: authorityEvidence(intent, false, true),
-    old_runtime_identity: OLD_RUNTIME, new_runtime_identity: finalConvergencePayload().final_candidate.runtime_identity,
-    old_target: "http://127.0.0.1:3000", new_target: "http://127.0.0.1:13000",
+    authority_evidence: authorityEvidence(intent, false, true, plan),
+    old_runtime_identity: OLD_RUNTIME, new_runtime_identity: finalConvergencePayload({}, plan).final_candidate.runtime_identity,
+    old_target: plan.old_runtime.route_target, new_target: plan.candidate.route_target,
     started_at: "2026-09-23T12:05:00.000Z", completed_at: "2026-09-23T12:07:00.000Z",
     old_stack_mode: "RETAINED_READ_ONLY_NOT_DATA_SAFE", freeze_token: "freeze-runtime-0001",
     final_snapshot_id: "cutover-snapshot-1042", candidate_write_watermark: "canonical-write-1042",
@@ -303,20 +329,20 @@ function cutoverPayload(intent, overrides = {}) {
   };
 }
 
-function appendCutover(journal) {
-  const intent = routeIntentPayload("CUTOVER");
+function appendCutover(journal, plan = releasePlan()) {
+  const intent = routeIntentPayload("CUTOVER", {}, plan);
   append(journal, "ROUTE_INTENT", intent, "2026-09-23T12:06:45.000Z");
-  append(journal, "CUTOVER", cutoverPayload(intent), "2026-09-23T12:07:00.000Z");
+  append(journal, "CUTOVER", cutoverPayload(intent, {}, plan), "2026-09-23T12:07:00.000Z");
   return intent;
 }
 
-function rollbackPayload(intent, overrides = {}) {
+function rollbackPayload(intent, overrides = {}, plan = releasePlan()) {
   return {
     operation_id: intent.operation_id, explicit: true, reason: "post-cutover health regression", route_provenance_state: "VERIFIED",
     route_observation: routeObservation(intent, intent.desired_target, "2026-09-23T12:10:00.000Z"),
-    authority_evidence: authorityEvidence(intent, true, false),
-    from_runtime_identity: finalConvergencePayload().final_candidate.runtime_identity, restored_runtime_identity: OLD_RUNTIME,
-    restored_target: "http://127.0.0.1:3000", database_restore_used: false,
+    authority_evidence: authorityEvidence(intent, true, false, plan),
+    from_runtime_identity: finalConvergencePayload({}, plan).final_candidate.runtime_identity, restored_runtime_identity: OLD_RUNTIME,
+    restored_target: plan.old_runtime.route_target, database_restore_used: false,
     started_at: intent.started_at, completed_at: "2026-09-23T12:10:00.000Z",
     rollback_safety: intent.rollback_safety,
     ...overrides,
@@ -327,8 +353,8 @@ function zeroWriteSafety(overrides = {}) {
   return {mode: "ZERO_CANONICAL_WRITES", status: "VERIFIED", cutover_write_watermark: "canonical-write-1042", candidate_write_watermark: "canonical-write-1042", synchronization_id: null, target_write_watermark: "canonical-write-1042", preserves_candidate_writes: true, ...overrides};
 }
 
-function completionPayload() {
-  const body = {action: "observe-candidate-write-watermark", runtime_identity: finalConvergencePayload().final_candidate.runtime_identity, candidate_write_watermark: "canonical-write-1042", observed_at: "2026-09-23T12:07:30.000Z", status: "VERIFIED"};
+function completionPayload(plan = releasePlan()) {
+  const body = {action: "observe-candidate-write-watermark", runtime_identity: finalConvergencePayload({}, plan).final_candidate.runtime_identity, candidate_write_watermark: "canonical-write-1042", observed_at: "2026-09-23T12:07:30.000Z", status: "VERIFIED"};
   return {result: "SUCCESS", runtime_adapter: "dsdst-runtime-switch-v1", adapter_evidence: {...body, evidence_digest: createEvidenceDigest(body)}};
 }
 
@@ -455,6 +481,36 @@ test("14. exact source-set closure is enforced", () => {
   const plan = releasePlan();
   plan.accepted_v2_16_source_set.operations_closure_revision = "f".repeat(40);
   assert.throws(() => prepareRelease(tempJournal(), plan), /V2-16|closure|accepted/i);
+});
+
+test("14a. exact V2-18 plan runs prepare through cutover and rollback with V2-18 recovery provenance", () => {
+  const plan = v218ReleasePlan();
+  const journal = tempJournal();
+  advanceToConverged(journal, plan);
+  appendCutover(journal, plan);
+  append(journal, "COMPLETE", completionPayload(plan), "2026-09-23T12:07:30.000Z");
+  const rollbackIntent = routeIntentPayload("ROLLBACK", {}, plan);
+  append(journal, "ROUTE_INTENT", rollbackIntent, "2026-09-23T12:08:00.000Z");
+  append(journal, "ROLLBACK", rollbackPayload(rollbackIntent, {}, plan), "2026-09-23T12:10:00.000Z");
+  const report = buildReleaseReport(journal);
+  assert.equal(report.release, "V2-18");
+  assert.equal(report.backup_id, "rp-v2-18-fixture");
+  assert.equal(report.state, "ROLLED_BACK");
+  assert.equal(report.runtime.current_identity, OLD_RUNTIME);
+});
+
+test("14b. V2-18 rejects the wrong prior closure, source set, or recovery release", () => {
+  const wrongClosure = v218ReleasePlan();
+  wrongClosure.accepted_v2_17_source_set.operations_closure_revision = "f".repeat(40);
+  assert.throws(() => prepareRelease(tempJournal(), wrongClosure), /V2-17|closure|accepted/i);
+
+  const wrongSource = v218ReleasePlan();
+  wrongSource.source_set.repositories.find(({id}) => id === "P").revision = "f".repeat(40);
+  assert.throws(() => prepareRelease(tempJournal(), wrongSource), /V2-18|source set|revision/i);
+
+  const wrongRecovery = v218ReleasePlan();
+  wrongRecovery.recovery_point.source_release = "V2-16";
+  assert.throws(() => prepareRelease(tempJournal(), wrongRecovery), /V2-18|recovery point/i);
 });
 
 test("15. 59-minute recovery point with newer writes cannot be the cutover data source", () => {

@@ -47,7 +47,7 @@ remain exact.
 | Gate | Evidence | Result |
 | --- | --- | --- |
 | Exact source / CI / E2E | V2-18 manifest, workflow-output parser, exact verifier, negative historical-manifest tests | PASS |
-| O architecture/contracts | `npm test` | PASS — 211/211 |
+| O architecture/contracts | `npm test` | PASS — 214/214 |
 | P domain/routes/security | `npm test` | PASS — 278/278 |
 | W client/BFF | `npm test`; typecheck; build; post-build secret scan | PASS — 102/102 |
 | K authoring client | `npm test`; typecheck; build | PASS — 78/78 |
@@ -283,16 +283,16 @@ closed by regression tests. One P1 go-live blocker remains:
    networks and ports. Validate it together with a redacted release-evidence manifest.
 3. **Recovery gate.** Create an exact V2-18 recovery point containing P/K/L/Hub state and
    files, source set and runtime provenance; persist it offsite; then complete an isolated
-   restore drill within RPO/RTO. Current recovery acceptance is deliberately hard-bound
-   to V2-16, so it must receive a reviewed/versioned V2-18 contract before execution; a
-   V2-16 point must not be relabeled as V2-18 evidence.
+   restore drill within RPO/RTO. The reviewed recovery profile now accepts only the exact
+   canonical V2-18 manifest (while preserving V2-16 compatibility); execution evidence is
+   still missing. A V2-16 point cannot be relabeled as V2-18 evidence.
 4. **Candidate/cutover gate.** After 1–3, prove a separately named candidate project,
    networks, ports and new volume identities, then migration preflight, hydration,
    health, read-only smoke, connectivity, one-writer fencing and route reconciliation.
-   Current release-plan validation is deliberately hard-bound to V2-17, so a reviewed
-   V2-18 plan/controller update is required before using it. Candidate services must
-   never mount an existing production volume. Cloudflare mutation remains a separately
-   approved final action and was not performed here.
+   The reviewed controller now accepts exact V2-17 and V2-18 profiles and regression-tests
+   the V2-18 prepare-through-rollback state path. Runtime execution evidence is still
+   missing. Candidate services must never mount an existing production volume. Cloudflare
+   mutation remains a separately approved final action and was not performed here.
 
 ## 6. Next safe runtime-provenance step
 

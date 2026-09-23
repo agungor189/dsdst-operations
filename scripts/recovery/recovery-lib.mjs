@@ -5,7 +5,15 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 export const FORMAT_VERSION = "dsdst.recovery-point.v2";
-export const TOOL_VERSION = "v2.16.1";
+export const TOOL_VERSION = "v2.18.0";
+
+const RECOVERY_SOURCE_SETS = new Map([
+  "V2-16",
+  "V2-18",
+].map((release) => [
+  release,
+  JSON.parse(fs.readFileSync(new URL(`../../config/${release.toLowerCase()}-source-set.json`, import.meta.url), "utf8")),
+]));
 
 const COMPONENTS = Object.freeze({
   panel_database: { path: "payload/panel/database.sqlite", kind: "sqlite", runtime: "dsdst-panel" },
@@ -45,6 +53,18 @@ function canonicalValue(value) {
     return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonicalValue(value[key])]));
   }
   return value;
+}
+
+export function validateRecoverySourceSet(sourceSet) {
+  if (sourceSet?.schemaVersion !== "dsdst.test-source-set.v1" || typeof sourceSet.release !== "string") {
+    fail("Recovery source-set provenance is missing or unsupported");
+  }
+  const expected = RECOVERY_SOURCE_SETS.get(sourceSet.release);
+  if (!expected) fail(`Unsupported recovery source-set release: ${sourceSet.release}`);
+  if (JSON.stringify(canonicalValue(sourceSet)) !== JSON.stringify(canonicalValue(expected))) {
+    fail(`Recovery source-set does not match the exact canonical ${sourceSet.release} source set`);
+  }
+  return sourceSet;
 }
 
 function manifestAuthenticationPayload(manifest) {
@@ -198,9 +218,7 @@ function validateProvenance(pointPath, components) {
   const sourceSet = readJson(path.join(pointPath, components.source_set.path), "Source-set provenance");
   const sourceObservation = readJson(path.join(pointPath, components.source_set_observation.path), "Source-set observation");
   const runtime = readJson(path.join(pointPath, components.runtime_provenance.path), "Runtime provenance");
-  if (sourceSet.schemaVersion !== "dsdst.test-source-set.v1" || sourceSet.release !== "V2-16") {
-    fail("Source-set provenance does not identify V2-16");
-  }
+  validateRecoverySourceSet(sourceSet);
   if (!Array.isArray(sourceSet.repositories)) fail("Source-set repositories are missing");
   const sourceById = new Map(sourceSet.repositories.map((entry) => [entry.id, entry]));
   for (const id of ["O", "P", "W", "K", "L"]) {
