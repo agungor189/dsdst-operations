@@ -7,7 +7,7 @@
     "operationsClosureRevision": "b62cc89d586ddde15c9a0fe9e5ee71a66d2b43d1"
   },
   "repositories": [
-    { "id": "O", "repository": "agungor189/dsdst-operations", "contextEnv": "OPERATIONS_CONTEXT", "revision": "6291bf45e3b75043d8826a4398f630467191de3a" },
+    { "id": "O", "repository": "agungor189/dsdst-operations", "contextEnv": "OPERATIONS_CONTEXT", "revision": "f3ec0168c97740aeba20489af7f1bd2c1cb47e92" },
     { "id": "P", "repository": "agungor189/panel-kit-yonetimi", "contextEnv": "PANEL_CONTEXT", "revision": "9bcd74098ff945a0355999f1ac01c53d777c9696" },
     { "id": "W", "repository": "agungor189/Dsdst-Warehouse", "contextEnv": "WAREHOUSE_CONTEXT", "revision": "525e18c508c1191c0c4e4b725bda00defd930d2f" },
     { "id": "K", "repository": "agungor189/dsdst-kit-studio", "contextEnv": "KIT_STUDIO_CONTEXT", "revision": "0e0717c3f8d3f3f0af186b4c165524bc2e81724c" },
