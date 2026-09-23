@@ -8,7 +8,7 @@ Use `docs/runtime-release.md`. Production release requires an exact digest-pinne
 
 ## Upgrades and rollback
 
-The previous runtime becomes a stopped/read-only rollback target and its volume identities are retained for seven days. Rollback uses the explicit V2-17 command to restore the previous runtime and Cloudflare target identities. It never performs an automatic database restore. Restore remains a separate, approved V2-16 recovery operation.
+After pre-verification, the runtime adapter freezes production writes and the release captures a hashed, transactionally consistent final-current snapshot. Only a candidate rehydrated from that snapshot, migrated, provenance-checked, healthy, and smoke-tested can cut over. The previous runtime becomes stopped/read-only and its volumes are retained for seven days, but they are not presumed data-safe after candidate writes. Rollback restores its route only with verified zero-candidate-write evidence or a verified current-state synchronization that preserves every candidate-era write. It never performs an automatic database restore.
 
 The old per-repository compose files remain valid during the transition. Remove them only after at least one successful production deployment, backup verification, rollback rehearsal, and confirmation that no host automation still calls them.
 

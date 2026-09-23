@@ -6,8 +6,9 @@ This runbook is the V2-17 operator contract. It prepares commands; repository te
 
 ```text
 PREPARED -> APPROVED -> PREFLIGHT_PASSED -> CANDIDATE_UP
-         -> VERIFIED -> CUTOVER -> COMPLETED
-                           \-> FAILED -> ROLLED_BACK (only if cutover occurred)
+         -> VERIFIED --[FREEZE + FINAL_CONVERGENCE]--> CUTOVER -> COMPLETED
+                    \-> FAILED (old writer resumed; route unchanged)
+                                                       \-> ROLLED_BACK (proof-gated)
                      COMPLETED -> ROLLED_BACK (inside the retention window)
 ```
 
@@ -71,7 +72,7 @@ Validate and pull without builds:
 ./scripts/release/candidate-stack.sh pull   /approved/release-evidence/v2-17.ndjson /approved/secrets/v2-17-candidate.env
 ```
 
-Hydrate only the separate candidate volumes from the already verified isolated restore. The approved adapter runs the real candidate migrations and emits their exact identities; it is forbidden from mounting old production volumes:
+Hydrate only the separate candidate volumes from the already verified isolated restore for pre-verification. This recovery point remains mandatory protection evidence, but it is never the normal-cutover business-data source. The approved adapter runs candidate pre-verification migrations and is forbidden from mounting old production volumes:
 
 ```sh
 ./scripts/release/hydrate-candidate.sh \
@@ -86,7 +87,7 @@ Hydrate only the separate candidate volumes from the already verified isolated r
   /approved/secrets/v2-17-candidate.env
 ```
 
-Freeze production writes before final hydration and record that timestamp. It starts the interruption clock; route switching time alone is not the cutover duration. The overlay assigns separate named volumes and networks and hard-binds published ports to loopback. Collect candidate provenance read-only. Record `CANDIDATE_UP` only with the write-freeze timestamp, verified hydration result and exact migrations actually run, collector capture ID, all six exact source/image/config/container observations, actual volume source identities, and observed loopback bindings:
+The overlay assigns separate named volumes and networks and hard-binds published ports to loopback. Collect candidate provenance read-only. Record `CANDIDATE_UP` with the pre-verification hydration result, exact migrations, collector capture ID, all six exact source/image/config/container observations, actual volume source identities, and observed loopback bindings. Operator-supplied freeze timestamps are forbidden:
 
 ```sh
 node scripts/release/release-cli.mjs candidate-up \
@@ -112,7 +113,27 @@ node scripts/release/release-cli.mjs verify \
   /approved/release-evidence/v2-17-verification.redacted.json
 ```
 
-A failed or missing check never reaches `VERIFIED` and therefore cannot cut over. If checks fail after write freeze, explicitly abort the candidate, restore the old writer, and verify that Cloudflare never moved:
+A failed or missing check never reaches `VERIFIED` and therefore cannot begin convergence or cut over.
+
+## 5. Freeze and converge current production data
+
+After pre-verification, run the controller. It calls the runtime adapter directly to freeze old production writes and records the adapter's opaque audit token, timestamp, runtime identity, and canonical source watermark. That timestamp starts the ten-minute hard interruption clock. The operator cannot submit or override it.
+
+The final-snapshot adapter must transactionally capture `P_DB`, `P_UPLOADS`, `K_DB`, `K_UPLOADS`, `L_STATE`, `HUB_DB`, and `HUB_ATTACHMENTS`. Live SQLite uses online backup; stopped databases may use a verified stopped-state copy. Raw copying a live writable SQLite file is rejected. Every component and the manifest are hashed. The hydration adapter then replaces candidate data only from this final snapshot, runs migrations, recollects runtime/schema provenance, verifies the source watermark, and reruns all critical health, read-only smoke, and connectivity checks.
+
+```sh
+CLOUDFLARE_ROUTE_ID=<from-protected-config> \
+CLOUDFLARE_ROUTE_ADAPTER=/approved/adapters/dsdst-cloudflare-route \
+DSDST_RUNTIME_SWITCH_ADAPTER=/approved/adapters/dsdst-runtime-switch \
+DSDST_FINAL_SNAPSHOT_ADAPTER=/approved/adapters/dsdst-final-snapshot \
+DSDST_FINAL_HYDRATION_ADAPTER=/approved/adapters/dsdst-final-hydration \
+node scripts/release/final-convergence.mjs \
+  /approved/release-evidence/v2-17.ndjson
+```
+
+If any pre-route step fails after freeze, the controller resumes the old writer, disables candidate writes, verifies the route is still the old target, and records `FAILED`. The candidate remains non-authoritative.
+
+For an explicit operator abort after freeze:
 
 ```sh
 DSDST_RELEASE_FAILURE_REASON='candidate health or smoke failure' \
@@ -123,7 +144,7 @@ node scripts/release/cloudflare-route.mjs abort \
   /approved/release-evidence/v2-17.ndjson
 ```
 
-## 5. Explicit Cloudflare cutover
+## 6. Explicit Cloudflare cutover
 
 Review the commands without mutation:
 
@@ -131,7 +152,7 @@ Review the commands without mutation:
 node scripts/release/cloudflare-route.mjs plan /approved/release-evidence/v2-17.ndjson
 ```
 
-The Cloudflare adapter must read the actual route ID from `DSDST_CLOUDFLARE_ROUTE_ID`, verify the expected target, perform one exact target change, and return redacted provenance JSON. The runtime-switch adapter must stop/fence old writers, report `READ_ONLY_STOPPED`, and recheck candidate health. Both adapter paths must be absolute. Cutover is the only route-mutating release command:
+The Cloudflare adapter must read the actual route ID from `DSDST_CLOUDFLARE_ROUTE_ID`, verify the expected target, perform one exact target change, and return redacted provenance JSON. The runtime adapter must confirm the exact freeze token remains fenced, the final candidate is healthy, and its write watermark equals the final snapshot watermark. Both adapter paths must be absolute. Cutover is the only route-mutating release command:
 
 ```sh
 CLOUDFLARE_ROUTE_ID=<from-protected-config> \
@@ -143,19 +164,19 @@ node scripts/release/cloudflare-route.mjs cutover \
 
 The controller measures from production write freeze, not from the later route command. It records start/end times, the approval ID, verified route result, and old/new runtime identities. More than ten minutes is rejected; more than five minutes is recorded as a target miss. If route mutation fails, do not assert completion—use the adapter's verified current-target result to decide whether the route is unchanged or explicit rollback is required.
 
-Complete only after post-cutover read-only checks pass:
+Complete only after post-cutover checks pass. The controller verifies the route still targets the candidate and records a runtime-adapter-derived candidate write watermark observed after cutover:
 
 ```sh
-node scripts/release/release-cli.mjs complete \
-  /approved/release-evidence/v2-17.ndjson \
-  /approved/release-input/v2-17-complete.json
+DSDST_RUNTIME_SWITCH_ADAPTER=/approved/adapters/dsdst-runtime-switch \
+CLOUDFLARE_ROUTE_ID=<from-protected-config> \
+CLOUDFLARE_ROUTE_ADAPTER=/approved/adapters/dsdst-cloudflare-route \
+node scripts/release/cloudflare-route.mjs complete \
+  /approved/release-evidence/v2-17.ndjson
 ```
 
-`v2-17-complete.json` contains only `{ "result": "SUCCESS" }`.
+## 7. Deterministic, data-safe rollback
 
-## 6. Deterministic rollback
-
-Rollback never restores a database automatically. It reactivates and health-checks the retained previous runtime, verifies no DB restore was used, restores the exact previous Cloudflare target, and records the result. It is accepted only inside the seven-day window.
+Rollback never restores a database automatically. The old stack and volumes are retained read-only for seven days, but retention alone does not make their data current or safe. Before any route mutation, the runtime adapter must prove either `ZERO_CANONICAL_WRITES` by showing the current candidate watermark equals the cutover watermark, or `CURRENT_STATE_SYNC` by verifying a synchronization/migration into the old runtime whose target watermark equals the newest candidate watermark and preserves every candidate-era write. Without either proof rollback fails closed and the route stays on the candidate.
 
 ```sh
 DSDST_ROLLBACK_REASON='operator-approved reason' \
@@ -166,9 +187,9 @@ node scripts/release/cloudflare-route.mjs rollback \
   /approved/release-evidence/v2-17.ndjson
 ```
 
-Retain the previous volume identities and stopped/read-only runtime for seven full days after cutover. Deletion is a separately approved retention operation and is not implemented by this release command.
+Retain the previous volume identities and stopped/read-only runtime for seven full days after cutover. Do not describe them as a data-safe rollback state without one of the proofs above. Deletion is a separately approved retention operation and is not implemented by this release command.
 
-## 7. Evidence report
+## 8. Evidence report
 
 ```sh
 node scripts/release/release-cli.mjs report \
@@ -176,4 +197,4 @@ node scripts/release/release-cli.mjs report \
   > /approved/release-evidence/v2-17-report.redacted.json
 ```
 
-The report is a projection of the verified journal, not a new authority. Preserve the NDJSON journal and adapter evidence. Re-running `report` detects journal tampering.
+The report is a projection of the verified journal, not a new authority. It includes the actual freeze token/time/runtime, final snapshot ID and component hashes, source and candidate watermarks, final hydration snapshot, post-hydration migrations, final runtime/schema/data checks, and rollback zero-write or synchronization proof. Preserve the NDJSON journal and adapter evidence. Re-running `report` detects journal tampering.

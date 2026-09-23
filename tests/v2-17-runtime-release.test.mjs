@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   appendReleaseEvent,
   buildReleaseReport,
+  createEvidenceDigest,
   prepareRelease,
   readReleaseJournal,
 } from "../scripts/release/release-lib.mjs";
@@ -167,7 +168,6 @@ function candidatePayload() {
     runtime_identity: captureId,
     volume_ids: ["candidate-panel", "candidate-kit", "candidate-label", "candidate-hub"],
     host_bindings: ["127.0.0.1:13000", "127.0.0.1:13006", "127.0.0.1:13012", "127.0.0.1:13100", "127.0.0.1:13013"],
-    write_freeze_started_at: "2026-09-23T12:02:30.000Z",
     hydration: {
       status: "PASS",
       backup_id: "rp-v2-16-fixture",
@@ -202,6 +202,80 @@ function advanceToVerified(journal) {
   append(journal, "PREFLIGHT_PASS", preflightPayload(), "2026-09-23T12:02:00.000Z");
   append(journal, "CANDIDATE_UP", candidatePayload(), "2026-09-23T12:03:00.000Z");
   append(journal, "VERIFY", verificationPayload(), "2026-09-23T12:04:00.000Z");
+}
+
+function freezePayload(overrides = {}) {
+  const body = {
+    action: "freeze-writes",
+    freeze_token: "freeze-runtime-0001",
+    freeze_started_at: "2026-09-23T12:05:00.000Z",
+    runtime_identity: OLD_RUNTIME,
+    source_data_watermark: "canonical-write-1042",
+    write_state: "FROZEN",
+    ...overrides,
+  };
+  return {runtime_adapter: "dsdst-runtime-switch-v1", adapter_evidence: {...body, evidence_digest: createEvidenceDigest(body)}};
+}
+
+function finalConvergencePayload(overrides = {}) {
+  const components = [
+    ["P_DB", "sqlite", "online-sqlite-backup", "1"],
+    ["P_UPLOADS", "files", "frozen-filesystem-snapshot", "2"],
+    ["K_DB", "sqlite", "online-sqlite-backup", "3"],
+    ["K_UPLOADS", "files", "frozen-filesystem-snapshot", "4"],
+    ["L_STATE", "files", "frozen-filesystem-snapshot", "5"],
+    ["HUB_DB", "sqlite", "online-sqlite-backup", "6"],
+    ["HUB_ATTACHMENTS", "files", "frozen-filesystem-snapshot", "7"],
+  ].map(([authority, kind, capture_method, digit]) => ({authority, kind, capture_method, content_hash: `sha256:${digit.repeat(64)}`}));
+  const snapshotBody = {snapshot_id: "cutover-snapshot-1042", created_at: "2026-09-23T12:05:20.000Z", source_data_watermark: "canonical-write-1042", status: "VERIFIED", components};
+  const initial = candidatePayload().runtime_provenance;
+  const capturedAt = "2026-09-23T12:06:30.000Z";
+  const records = structuredClone(initial.services);
+  records.forEach((record) => { record.capture_id = "runtime-pending"; });
+  const runtimeIdentity = createRuntimeCaptureId(capturedAt, records);
+  records.forEach((record) => { record.capture_id = runtimeIdentity; });
+  const migrations = ["panel:81->81", "kit:10->10", "hub:5->5"];
+  return {
+    freeze_token: "freeze-runtime-0001",
+    final_snapshot: {...snapshotBody, manifest_hash: createEvidenceDigest(snapshotBody)},
+    candidate_hydration: {status: "PASS", snapshot_id: "cutover-snapshot-1042", old_volume_mounted: false, completed_at: "2026-09-23T12:06:00.000Z", migrations_ran: migrations},
+    final_candidate: {
+      runtime_identity: runtimeIdentity,
+      candidate_authoritative: false,
+      runtime_provenance: {collector: "dsdst-read-only-runtime-collector-v1", capture_id: runtimeIdentity, captured_at: capturedAt, services: records},
+      schema_provenance: {status: "VERIFIED", fingerprint: `sha256:${"8".repeat(64)}`, migrations},
+      data_verification: {status: "PASS", source_data_watermark: "canonical-write-1042"},
+      checks: {critical_services: Object.keys(SERVICE_COMPONENTS).map((service_id) => ({service_id, status: "PASS"})), smoke: {status: "PASS", mode: "READ_ONLY"}, connectivity: {status: "PASS", checks: ["W->P", "K->P", "L->P", "Hub->P"]}},
+    },
+    ...overrides,
+  };
+}
+
+function advanceToConverged(journal) {
+  advanceToVerified(journal);
+  append(journal, "FREEZE", freezePayload(), "2026-09-23T12:05:10.000Z");
+  append(journal, "FINAL_CONVERGENCE", finalConvergencePayload(), "2026-09-23T12:06:40.000Z");
+}
+
+function cutoverPayload(overrides = {}) {
+  return {
+    explicit: true, approval_id: "approval-17", route_provenance_state: "VERIFIED",
+    old_runtime_identity: OLD_RUNTIME, new_runtime_identity: finalConvergencePayload().final_candidate.runtime_identity,
+    old_target: "http://127.0.0.1:3000", new_target: "http://127.0.0.1:13000",
+    started_at: "2026-09-23T12:05:00.000Z", completed_at: "2026-09-23T12:07:00.000Z",
+    old_stack_mode: "RETAINED_READ_ONLY_NOT_DATA_SAFE", freeze_token: "freeze-runtime-0001",
+    final_snapshot_id: "cutover-snapshot-1042", candidate_write_watermark: "canonical-write-1042",
+    ...overrides,
+  };
+}
+
+function zeroWriteSafety(overrides = {}) {
+  return {mode: "ZERO_CANONICAL_WRITES", status: "VERIFIED", cutover_write_watermark: "canonical-write-1042", candidate_write_watermark: "canonical-write-1042", synchronization_id: null, target_write_watermark: "canonical-write-1042", preserves_candidate_writes: true, ...overrides};
+}
+
+function completionPayload() {
+  const body = {action: "observe-candidate-write-watermark", runtime_identity: finalConvergencePayload().final_candidate.runtime_identity, candidate_write_watermark: "canonical-write-1042", observed_at: "2026-09-23T12:07:30.000Z", status: "VERIFIED"};
+  return {result: "SUCCESS", runtime_adapter: "dsdst-runtime-switch-v1", adapter_evidence: {...body, evidence_digest: createEvidenceDigest(body)}};
 }
 
 test("1. no approval blocks preflight and candidate release", () => {
@@ -264,65 +338,47 @@ test("7. read-only smoke failure blocks verification and cutover", () => {
 
 test("8. successful release evidence is complete", () => {
   const journal = tempJournal();
-  advanceToVerified(journal);
-  append(journal, "CUTOVER", {
-    explicit: true,
-    approval_id: "approval-17",
-    route_provenance_state: "VERIFIED",
-    old_runtime_identity: OLD_RUNTIME,
-    new_runtime_identity: candidatePayload().runtime_identity,
-    old_target: "http://127.0.0.1:3000",
-    new_target: "http://127.0.0.1:13000",
-    started_at: "2026-09-23T12:02:30.000Z",
-    completed_at: "2026-09-23T12:07:00.000Z",
-    old_stack_mode: "READ_ONLY_STOPPED",
-  }, "2026-09-23T12:07:00.000Z");
-  append(journal, "COMPLETE", {result: "SUCCESS"}, "2026-09-23T12:07:30.000Z");
+  advanceToConverged(journal);
+  append(journal, "CUTOVER", cutoverPayload(), "2026-09-23T12:07:00.000Z");
+  append(journal, "COMPLETE", completionPayload(), "2026-09-23T12:07:30.000Z");
   const report = buildReleaseReport(journal);
   assert.equal(report.state, "COMPLETED");
   assert.equal(report.approval.approved_by, "operator-17");
   assert.equal(report.backup_id, "rp-v2-16-fixture");
   assert.deepEqual(report.migrations, ["panel:81->81", "kit:10->10", "hub:5->5"]);
-  assert.equal(report.cutover.duration_seconds, 270);
+  assert.equal(report.cutover.duration_seconds, 120);
+  assert.equal(report.final_convergence.snapshot_id, "cutover-snapshot-1042");
+  assert.equal(report.write_freeze.source_data_watermark, "canonical-write-1042");
+  assert.equal(report.candidate_write_watermark_after_cutover.watermark, "canonical-write-1042");
   assert.equal(report.rollback.used, false);
   assert.ok(report.source_set.repositories.length === 6 && report.images.length === 6);
 });
 
 test("9. rollback returns route to the previous runtime identity", () => {
   const journal = tempJournal();
-  advanceToVerified(journal);
-  append(journal, "CUTOVER", {
-    explicit: true, approval_id: "approval-17", route_provenance_state: "VERIFIED",
-    old_runtime_identity: OLD_RUNTIME, new_runtime_identity: candidatePayload().runtime_identity,
-    old_target: "http://127.0.0.1:3000", new_target: "http://127.0.0.1:13000",
-    started_at: "2026-09-23T12:02:30.000Z", completed_at: "2026-09-23T12:07:00.000Z",
-    old_stack_mode: "READ_ONLY_STOPPED",
-  }, "2026-09-23T12:07:00.000Z");
-  append(journal, "COMPLETE", {result: "SUCCESS"}, "2026-09-23T12:07:30.000Z");
+  advanceToConverged(journal);
+  append(journal, "CUTOVER", cutoverPayload(), "2026-09-23T12:07:00.000Z");
+  append(journal, "COMPLETE", completionPayload(), "2026-09-23T12:07:30.000Z");
   append(journal, "ROLLBACK", {
     explicit: true, reason: "post-cutover health regression", route_provenance_state: "VERIFIED",
-    from_runtime_identity: candidatePayload().runtime_identity, restored_runtime_identity: OLD_RUNTIME,
+    from_runtime_identity: finalConvergencePayload().final_candidate.runtime_identity, restored_runtime_identity: OLD_RUNTIME,
     restored_target: "http://127.0.0.1:3000", database_restore_used: false,
     started_at: "2026-09-23T12:08:00.000Z", completed_at: "2026-09-23T12:10:00.000Z",
+    rollback_safety: zeroWriteSafety(),
   }, "2026-09-23T12:10:00.000Z");
   assert.equal(buildReleaseReport(journal).runtime.current_identity, OLD_RUNTIME);
 });
 
 test("10. rollback evidence is complete and forbids automatic DB restore", () => {
   const journal = tempJournal();
-  advanceToVerified(journal);
-  append(journal, "CUTOVER", {
-    explicit: true, approval_id: "approval-17", route_provenance_state: "VERIFIED",
-    old_runtime_identity: OLD_RUNTIME, new_runtime_identity: candidatePayload().runtime_identity,
-    old_target: "http://127.0.0.1:3000", new_target: "http://127.0.0.1:13000",
-    started_at: "2026-09-23T12:02:30.000Z", completed_at: "2026-09-23T12:07:00.000Z",
-    old_stack_mode: "READ_ONLY_STOPPED",
-  }, "2026-09-23T12:07:00.000Z");
+  advanceToConverged(journal);
+  append(journal, "CUTOVER", cutoverPayload(), "2026-09-23T12:07:00.000Z");
   assert.throws(() => append(journal, "ROLLBACK", {
     explicit: true, reason: "fixture", route_provenance_state: "VERIFIED",
-    from_runtime_identity: candidatePayload().runtime_identity, restored_runtime_identity: OLD_RUNTIME,
+    from_runtime_identity: finalConvergencePayload().final_candidate.runtime_identity, restored_runtime_identity: OLD_RUNTIME,
     restored_target: "http://127.0.0.1:3000", database_restore_used: true,
     started_at: "2026-09-23T12:08:00.000Z", completed_at: "2026-09-23T12:10:00.000Z",
+    rollback_safety: zeroWriteSafety(),
   }, "2026-09-23T12:10:00.000Z"), /database restore|automatic/i);
 });
 
@@ -352,6 +408,101 @@ test("14. exact source-set closure is enforced", () => {
   const plan = releasePlan();
   plan.accepted_v2_16_source_set.operations_closure_revision = "f".repeat(40);
   assert.throws(() => prepareRelease(tempJournal(), plan), /V2-16|closure|accepted/i);
+});
+
+test("15. 59-minute recovery point with newer writes cannot be the cutover data source", () => {
+  const plan = releasePlan();
+  plan.recovery_point.created_at = "2026-09-23T11:03:00.000Z";
+  const journal = tempJournal();
+  const prepared = prepareRelease(journal, plan);
+  append(journal, "APPROVE", approvalPayload(prepared.plan_hash), "2026-09-23T12:01:00.000Z");
+  append(journal, "PREFLIGHT_PASS", preflightPayload(), "2026-09-23T12:02:00.000Z");
+  append(journal, "CANDIDATE_UP", candidatePayload(), "2026-09-23T12:03:00.000Z");
+  append(journal, "VERIFY", verificationPayload(), "2026-09-23T12:04:00.000Z");
+  assert.throws(() => append(journal, "CUTOVER", cutoverPayload(), "2026-09-23T12:07:00.000Z"), /freeze|final convergence|blocked/i);
+});
+
+test("16. final snapshot and hydrated candidate must contain the newest frozen production write", () => {
+  const journal = tempJournal();
+  advanceToVerified(journal);
+  append(journal, "FREEZE", freezePayload(), "2026-09-23T12:05:10.000Z");
+  const stale = finalConvergencePayload();
+  stale.final_snapshot.source_data_watermark = "canonical-write-1041";
+  assert.throws(() => append(journal, "FINAL_CONVERGENCE", stale, "2026-09-23T12:06:40.000Z"), /frozen-current|watermark|newest/i);
+});
+
+test("17. fake or manually substituted freeze timestamp is rejected", () => {
+  const journal = tempJournal();
+  advanceToVerified(journal);
+  const freeze = freezePayload();
+  freeze.adapter_evidence.freeze_started_at = "2026-09-23T12:04:30.000Z";
+  assert.throws(() => append(journal, "FREEZE", freeze, "2026-09-23T12:05:10.000Z"), /adapter observation|bound|freeze time/i);
+});
+
+test("18. failure after freeze and before route resumes the old writer", () => {
+  const journal = tempJournal();
+  advanceToVerified(journal);
+  append(journal, "FREEZE", freezePayload(), "2026-09-23T12:05:10.000Z");
+  assert.throws(() => append(journal, "FAIL", {reason: "snapshot failed", route_mutated: false}, "2026-09-23T12:05:30.000Z"), /resume|old writer|unsupported/i);
+  const resumeBody = {action: "resume-old-writes", freeze_token: "freeze-runtime-0001", runtime_identity: OLD_RUNTIME, write_state: "ENABLED"};
+  append(journal, "FAIL", {
+    reason: "snapshot failed", route_mutated: false, candidate_authoritative: false, old_writes_resumed: true,
+    freeze_token: "freeze-runtime-0001", old_runtime_identity: OLD_RUNTIME, route_target: "http://127.0.0.1:3000",
+    resume_evidence: {...resumeBody, evidence_digest: createEvidenceDigest(resumeBody)},
+  }, "2026-09-23T12:05:30.000Z");
+  assert.equal(readReleaseJournal(journal).state, "FAILED");
+});
+
+test("19. route cannot move before final hydration migration provenance and smoke", () => {
+  const journal = tempJournal();
+  advanceToVerified(journal);
+  append(journal, "FREEZE", freezePayload(), "2026-09-23T12:05:10.000Z");
+  assert.throws(() => append(journal, "CUTOVER", cutoverPayload(), "2026-09-23T12:07:00.000Z"), /final convergence|blocked/i);
+  const failedSmoke = finalConvergencePayload();
+  failedSmoke.final_candidate.checks.smoke.status = "FAIL";
+  assert.throws(() => append(journal, "FINAL_CONVERGENCE", failedSmoke, "2026-09-23T12:06:40.000Z"), /smoke/i);
+});
+
+test("20. rollback after candidate writes without synchronization proof is blocked", () => {
+  const journal = tempJournal();
+  advanceToConverged(journal);
+  append(journal, "CUTOVER", cutoverPayload(), "2026-09-23T12:07:00.000Z");
+  assert.throws(() => append(journal, "ROLLBACK", {
+    explicit: true, reason: "fixture", route_provenance_state: "VERIFIED",
+    from_runtime_identity: finalConvergencePayload().final_candidate.runtime_identity, restored_runtime_identity: OLD_RUNTIME,
+    restored_target: "http://127.0.0.1:3000", database_restore_used: false,
+    started_at: "2026-09-23T12:08:00.000Z", completed_at: "2026-09-23T12:09:00.000Z",
+    rollback_safety: zeroWriteSafety({candidate_write_watermark: "canonical-write-1043"}),
+  }, "2026-09-23T12:09:00.000Z"), /zero canonical|synchronization|proof/i);
+});
+
+test("21. verified current-state synchronization preserves the newest candidate write", () => {
+  const journal = tempJournal();
+  advanceToConverged(journal);
+  append(journal, "CUTOVER", cutoverPayload(), "2026-09-23T12:07:00.000Z");
+  append(journal, "ROLLBACK", {
+    explicit: true, reason: "fixture", route_provenance_state: "VERIFIED",
+    from_runtime_identity: finalConvergencePayload().final_candidate.runtime_identity, restored_runtime_identity: OLD_RUNTIME,
+    restored_target: "http://127.0.0.1:3000", database_restore_used: false,
+    started_at: "2026-09-23T12:08:00.000Z", completed_at: "2026-09-23T12:09:00.000Z",
+    rollback_safety: {mode: "CURRENT_STATE_SYNC", status: "VERIFIED", cutover_write_watermark: "canonical-write-1042", candidate_write_watermark: "canonical-write-1043", synchronization_id: "rollback-sync-1043", target_write_watermark: "canonical-write-1043", preserves_candidate_writes: true},
+  }, "2026-09-23T12:09:00.000Z");
+  assert.equal(buildReleaseReport(journal).rollback.result.rollback_safety.target_write_watermark, "canonical-write-1043");
+});
+
+test("22. hard ten-minute clock starts at actual runtime freeze", () => {
+  const journal = tempJournal();
+  advanceToConverged(journal);
+  assert.throws(() => append(journal, "CUTOVER", cutoverPayload({completed_at: "2026-09-23T12:15:00.001Z"}), "2026-09-23T12:15:00.001Z"), /10 minute|exceeded/i);
+});
+
+test("23. final convergence rejects raw live writable SQLite copies", () => {
+  const journal = tempJournal();
+  advanceToVerified(journal);
+  append(journal, "FREEZE", freezePayload(), "2026-09-23T12:05:10.000Z");
+  const unsafe = finalConvergencePayload();
+  unsafe.final_snapshot.components[0].capture_method = "raw-copy";
+  assert.throws(() => append(journal, "FINAL_CONVERGENCE", unsafe, "2026-09-23T12:06:40.000Z"), /SQLite|online backup|stopped/i);
 });
 
 test("append-only journal detects tampering and illegal transitions", () => {

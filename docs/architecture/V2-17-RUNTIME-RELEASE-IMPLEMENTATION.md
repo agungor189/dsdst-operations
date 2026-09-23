@@ -28,11 +28,12 @@ The generated report answers the exact source set and immutable images, approver
 
 - V2-16 recovery must be `SUCCESS` / `VERIFIED` / offsite `PERSISTED`, have a verified restore drill, match the accepted V2-16 source set, and be no older than the approved threshold; the threshold may never exceed the accepted 60-minute RPO.
 - Every critical runtime image is an immutable registry digest and its OCI source revision matches the exact source set. L and renderer share the same image/source/config provenance.
-- Migration preflight runs on an isolated V2-16 restore before the candidate DB exists or is touched. Candidate hydration then copies only that isolated set into separate candidate volumes and records the exact migrations actually executed.
+- Migration preflight and candidate pre-verification use an isolated V2-16 restore. After pre-verification, the runtime adapter authoritatively freezes old writes and a transactionally consistent, hashed final-current snapshot becomes the only normal-cutover hydration source; live SQLite raw copies are rejected.
 - The candidate uses a distinct Compose project, network names, loopback ports, and persistent volume identities. Read-only collector evidence must prove it did not mount an old production volume.
 - All six critical health checks, read-only smoke, connectivity, and collector provenance pass before cutover.
 - Cloudflare route identity and current target are verified before mutation. Only the explicit `cutover` command can call the route adapter.
-- Cutover makes the old runtime a stopped, read-only rollback target, retains its volume identities for seven days, records both runtime identities, and measures the five-minute target and ten-minute hard maximum from production write freeze rather than the later route call.
+- Final hydration reruns migrations, runtime/schema provenance, source-watermark verification, health, read-only smoke, and connectivity before route mutation. The ten-minute hard maximum starts at the adapter-reported freeze event.
+- Cutover retains the old runtime read-only for seven days but does not claim stale old volumes are data-safe. Rollback requires verified zero candidate writes or verified current-state synchronization preserving all candidate-era writes before Cloudflare can move.
 - Rollback is explicit, restores the exact prior runtime/route identity, and rejects any automatic database restore.
 
 ## Schema, data, and rollback impact

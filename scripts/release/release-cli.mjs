@@ -24,10 +24,7 @@ const eventTypes = {
   "preflight-passed": "PREFLIGHT_PASS",
   "candidate-up": "CANDIDATE_UP",
   verify: "VERIFY",
-  cutover: "CUTOVER",
-  complete: "COMPLETE",
   fail: "FAIL",
-  rollback: "ROLLBACK",
 };
 
 try {
@@ -52,7 +49,7 @@ try {
   } else if (command === "report") {
     output(buildReleaseReport(journalPath));
   } else {
-    throw new Error("Usage: release-cli.mjs <prepare|approve|preflight-passed|candidate-up|verify|cutover|complete|fail|rollback|state|assert-state|candidate-project|backup-id|report> <journal> [input.json|expected-state] [occurred-at]");
+    throw new Error("Usage: release-cli.mjs <prepare|approve|preflight-passed|candidate-up|verify|fail|state|assert-state|candidate-project|backup-id|report> <journal> [input.json|expected-state] [occurred-at]; freeze/final convergence/cutover/completion/rollback are adapter-controlled commands");
   }
 } catch (error) {
   console.error(error.message);

@@ -84,7 +84,7 @@ function assertNoSensitiveKeys(value, location = "evidence") {
   }
   if (!value || typeof value !== "object") return;
   for (const [key, child] of Object.entries(value)) {
-    if (SENSITIVE_KEY.test(key) && key !== "secret_config_check") fail(`${location}.${key}: secret/sensitive fields are forbidden in release evidence`);
+    if (SENSITIVE_KEY.test(key) && !["secret_config_check", "freeze_token"].includes(key)) fail(`${location}.${key}: secret/sensitive fields are forbidden in release evidence`);
     assertNoSensitiveKeys(child, `${location}.${key}`);
   }
 }
@@ -101,6 +101,31 @@ function canonical(value) {
 
 function hash(value) {
   return `sha256:${createHash("sha256").update(typeof value === "string" ? value : canonical(value)).digest("hex")}`;
+}
+
+export function createEvidenceDigest(value) {
+  return hash(value);
+}
+
+function verifyBoundEvidence(value, label) {
+  const evidence = object(value, label);
+  const {evidence_digest: evidenceDigest, ...body} = evidence;
+  digest(evidenceDigest, `${label}.evidence_digest`);
+  if (evidenceDigest !== hash(body)) fail(`${label} is not bound to the adapter observation`);
+  return evidence;
+}
+
+function validateChecks(value, label) {
+  const checks = object(value, label);
+  exactKeys(checks, ["critical_services", "smoke", "connectivity"], label);
+  array(checks.critical_services, `${label}.critical_services`).forEach((item) => exactKeys(item, ["service_id", "status"], `${label}.critical service`));
+  if (!allPass(checks.critical_services) || checks.critical_services.length !== REQUIRED_SERVICES.size) fail("all critical service health checks must pass");
+  const ids = new Set(checks.critical_services.map((item) => item.service_id));
+  if ([...REQUIRED_SERVICES.keys()].some((id) => !ids.has(id))) fail("critical service health evidence is incomplete");
+  exactKeys(checks.smoke, ["status", "mode"], `${label}.smoke`);
+  if (checks.smoke.status !== "PASS" || checks.smoke.mode !== "READ_ONLY") fail("read-only smoke must pass before cutover");
+  exactKeys(checks.connectivity, ["status", "checks"], `${label}.connectivity`);
+  if (checks.connectivity.status !== "PASS" || array(checks.connectivity.checks, `${label}.connectivity.checks`).length === 0) fail("critical cross-service connectivity checks must pass");
 }
 
 function revisionMap(sourceSet, label) {
@@ -296,7 +321,7 @@ function validateTransition(context) {
     APPROVED: ["PREFLIGHT_PASS", "FAIL"],
     PREFLIGHT_PASSED: ["CANDIDATE_UP", "FAIL"],
     CANDIDATE_UP: ["VERIFY", "FAIL"],
-    VERIFIED: ["CUTOVER", "FAIL"],
+    VERIFIED: ["FREEZE", "FINAL_CONVERGENCE", "CUTOVER", "FAIL"],
     CUTOVER: ["COMPLETE", "ROLLBACK", "FAIL"],
     FAILED: ["ROLLBACK"],
     COMPLETED: ["ROLLBACK"],
@@ -308,7 +333,8 @@ function validateTransition(context) {
   }
   const expectedStates = {
     APPROVE: "APPROVED", PREFLIGHT_PASS: "PREFLIGHT_PASSED", CANDIDATE_UP: "CANDIDATE_UP",
-    VERIFY: "VERIFIED", CUTOVER: "CUTOVER", COMPLETE: "COMPLETED", FAIL: "FAILED", ROLLBACK: "ROLLED_BACK",
+    VERIFY: "VERIFIED", FREEZE: "VERIFIED", FINAL_CONVERGENCE: "VERIFIED", CUTOVER: "CUTOVER",
+    COMPLETE: "COMPLETED", FAIL: "FAILED", ROLLBACK: "ROLLED_BACK",
   };
   if (event.state !== expectedStates[event.type]) fail(`${event.type} must produce state ${expectedStates[event.type]}`);
 
@@ -330,7 +356,7 @@ function validateTransition(context) {
     if (migration.status !== "PASS" || migration.candidate_db_touched !== false) fail("migration preflight must pass before the candidate DB is touched");
     array(migration.migrations, "migration.migrations").forEach((item) => string(item, "migration identifier"));
   } else if (event.type === "CANDIDATE_UP") {
-    exactKeys(p, ["project", "runtime_identity", "volume_ids", "host_bindings", "write_freeze_started_at", "hydration", "runtime_provenance"], "candidate evidence");
+    exactKeys(p, ["project", "runtime_identity", "volume_ids", "host_bindings", "hydration", "runtime_provenance"], "candidate evidence");
     if (p.project !== plan.candidate.project) fail("candidate Compose project mismatch");
     string(p.runtime_identity, "candidate runtime identity");
     const candidateVolumes = array(p.volume_ids, "candidate volume_ids");
@@ -338,8 +364,6 @@ function validateTransition(context) {
     if (candidateVolumes.some((id) => oldVolumes.has(id))) fail("candidate cannot mount an old production volume");
     if (canonical(candidateVolumes) !== canonical(plan.candidate.volume_ids)) fail("candidate volume identities differ from the approved plan");
     if (canonical(p.host_bindings) !== canonical(plan.candidate.host_bindings)) fail("candidate host bindings differ from the approved plan");
-    const freezeStartedAt = iso(p.write_freeze_started_at, "candidate write_freeze_started_at");
-    if (freezeStartedAt > iso(event.occurred_at, "candidate event time")) fail("write freeze cannot begin after candidate-up evidence");
     const hydration = object(p.hydration, "candidate hydration evidence");
     exactKeys(hydration, ["status", "backup_id", "source_isolated_restore", "old_volume_mounted", "migrations_ran"], "candidate hydration evidence");
     if (hydration.status !== "PASS" || hydration.backup_id !== plan.recovery_point.recovery_point_id || hydration.source_isolated_restore !== true || hydration.old_volume_mounted !== false) {
@@ -409,35 +433,133 @@ function validateTransition(context) {
     string(p.runtime_identity, "verified runtime identity");
     const candidateEvent = context.events?.find?.((item) => item.type === "CANDIDATE_UP");
     if (!candidateEvent || p.runtime_identity !== candidateEvent.payload.runtime_identity) fail("verification runtime identity does not match the collected candidate runtime");
+  } else if (event.type === "FREEZE") {
+    exactKeys(p, ["runtime_adapter", "adapter_evidence"], "write freeze evidence");
+    if (p.runtime_adapter !== "dsdst-runtime-switch-v1") fail("write freeze must come from the approved runtime adapter");
+    const evidence = verifyBoundEvidence(p.adapter_evidence, "runtime freeze adapter evidence");
+    exactKeys(evidence, ["action", "freeze_token", "freeze_started_at", "runtime_identity", "source_data_watermark", "write_state", "evidence_digest"], "runtime freeze adapter evidence");
+    if (evidence.action !== "freeze-writes" || evidence.write_state !== "FROZEN") fail("runtime adapter did not authoritatively freeze old production writes");
+    if (!/^freeze-[a-z0-9-]{8,80}$/.test(string(evidence.freeze_token, "freeze token"))) fail("runtime adapter freeze token is invalid");
+    if (evidence.runtime_identity !== plan.old_runtime.runtime_identity) fail("write freeze runtime identity mismatch");
+    string(evidence.source_data_watermark, "source data watermark");
+    const freezeAt = iso(evidence.freeze_started_at, "runtime freeze time");
+    const recordedAt = iso(event.occurred_at, "write freeze recorded time");
+    if (freezeAt > recordedAt || recordedAt - freezeAt > 60_000) fail("write freeze time is not an authoritative current adapter observation");
+    if (context.events.some((item) => item.type === "FREEZE")) fail("write freeze can be recorded only once");
+  } else if (event.type === "FINAL_CONVERGENCE") {
+    exactKeys(p, ["freeze_token", "final_snapshot", "candidate_hydration", "final_candidate"], "final convergence evidence");
+    const freeze = context.events.find((item) => item.type === "FREEZE")?.payload.adapter_evidence;
+    if (!freeze || p.freeze_token !== freeze.freeze_token) fail("final convergence must bind the authoritative runtime freeze token");
+    const snapshot = object(p.final_snapshot, "final cutover snapshot");
+    exactKeys(snapshot, ["snapshot_id", "created_at", "source_data_watermark", "status", "components", "manifest_hash"], "final cutover snapshot");
+    string(snapshot.snapshot_id, "final snapshot id");
+    if (snapshot.status !== "VERIFIED" || snapshot.source_data_watermark !== freeze.source_data_watermark) fail("final snapshot must contain the frozen-current production watermark");
+    if (iso(snapshot.created_at, "final snapshot created_at") < iso(freeze.freeze_started_at, "freeze time")) fail("final snapshot predates the authoritative write freeze");
+    const required = new Set(["P_DB", "P_UPLOADS", "K_DB", "K_UPLOADS", "L_STATE", "HUB_DB", "HUB_ATTACHMENTS"]);
+    const components = array(snapshot.components, "final snapshot components");
+    for (const component of components) {
+      exactKeys(component, ["authority", "kind", "capture_method", "content_hash"], "final snapshot component");
+      if (!required.delete(component.authority)) fail("final snapshot contains an unexpected or duplicate mutable authority");
+      if (!["sqlite", "files"].includes(component.kind)) fail("final snapshot component kind is invalid");
+      if (component.kind === "sqlite" && !["online-sqlite-backup", "stopped-consistent-copy"].includes(component.capture_method)) fail("live writable SQLite databases must use online backup or safe stopped-state copy semantics");
+      if (component.kind === "files" && !["frozen-filesystem-snapshot", "stopped-consistent-copy"].includes(component.capture_method)) fail("mutable file state must use frozen or stopped consistent snapshot semantics");
+      digest(component.content_hash, "final snapshot component hash");
+    }
+    if (required.size > 0) fail(`final snapshot is missing mutable authoritative state: ${[...required].join(", ")}`);
+    const manifestBody = {snapshot_id: snapshot.snapshot_id, created_at: snapshot.created_at, source_data_watermark: snapshot.source_data_watermark, status: snapshot.status, components};
+    if (snapshot.manifest_hash !== hash(manifestBody)) fail("final snapshot manifest hash verification failed");
+    const hydration = object(p.candidate_hydration, "final candidate hydration");
+    exactKeys(hydration, ["status", "snapshot_id", "old_volume_mounted", "completed_at", "migrations_ran"], "final candidate hydration");
+    if (hydration.status !== "PASS" || hydration.snapshot_id !== snapshot.snapshot_id || hydration.old_volume_mounted !== false) fail("candidate must be hydrated only from the final frozen-current snapshot");
+    if (iso(hydration.completed_at, "final hydration completed_at") < iso(snapshot.created_at, "final snapshot created_at")) fail("final hydration cannot precede the final snapshot");
+    const migrations = array(hydration.migrations_ran, "post-final-hydration migrations");
+    migrations.forEach((item) => string(item, "post-final-hydration migration identity"));
+    const candidate = object(p.final_candidate, "final candidate verification");
+    exactKeys(candidate, ["runtime_identity", "runtime_provenance", "schema_provenance", "data_verification", "checks", "candidate_authoritative"], "final candidate verification");
+    if (candidate.candidate_authoritative !== false) fail("candidate must remain non-authoritative until explicit route cutover");
+    if (!/^runtime-[a-f0-9]{64}$/.test(string(candidate.runtime_identity, "final candidate runtime identity"))) fail("final candidate runtime identity is invalid");
+    const provenance = object(candidate.runtime_provenance, "final candidate runtime provenance");
+    exactKeys(provenance, ["collector", "capture_id", "captured_at", "services"], "final candidate runtime provenance");
+    if (provenance.collector !== "dsdst-read-only-runtime-collector-v1" || provenance.capture_id !== candidate.runtime_identity || provenance.capture_id !== createRuntimeCaptureId(provenance.captured_at, provenance.services)) fail("final candidate runtime provenance is not collector-bound");
+    if (iso(provenance.captured_at, "final candidate provenance captured_at") < iso(hydration.completed_at, "final hydration completed_at")) fail("final candidate provenance must be recollected after hydration and migration");
+    if (array(provenance.services, "final candidate provenance services").length !== REQUIRED_SERVICES.size) fail("final candidate runtime provenance is incomplete");
+    const planned = new Map(plan.services.map((service) => [service.service_id, service]));
+    const observed = new Set();
+    const oldVolumes = new Set(plan.old_runtime.volume_ids);
+    for (const record of provenance.services) {
+      const expected = planned.get(record.service_id);
+      if (!expected || observed.has(record.service_id) || record.capture_id !== provenance.capture_id || record.source_repository !== expected.repository || record.revision !== expected.source_revision || record.declared_image_reference !== expected.image_reference || record.image_digest !== expected.image_digest || record.image_id !== expected.image_id || record.configuration?.status !== "VERIFIED" || record.configuration?.redacted !== true || record.configuration?.fingerprint !== expected.config_fingerprint) fail(`final candidate provenance mismatch for ${record.service_id}`);
+      observed.add(record.service_id);
+      for (const volume of array(record.volumes, `final ${record.service_id}.volumes`)) {
+        if (oldVolumes.has(volume.source_id) || !plan.candidate.volume_ids.includes(volume.source_id)) fail("final candidate provenance observed an old or unapproved volume");
+      }
+      for (const port of array(record.ports, `final ${record.service_id}.ports`)) {
+        if (port.exposure === "published" && port.host_ip !== "127.0.0.1") fail("final candidate provenance observed a non-loopback host binding");
+      }
+    }
+    const schema = object(candidate.schema_provenance, "final candidate schema provenance");
+    exactKeys(schema, ["status", "fingerprint", "migrations"], "final candidate schema provenance");
+    if (schema.status !== "VERIFIED" || canonical(schema.migrations) !== canonical(migrations)) fail("final schema provenance must bind the migrations run after final hydration");
+    digest(schema.fingerprint, "final schema fingerprint");
+    exactKeys(candidate.data_verification, ["status", "source_data_watermark"], "final candidate data verification");
+    if (candidate.data_verification.status !== "PASS" || candidate.data_verification.source_data_watermark !== snapshot.source_data_watermark) fail("final candidate data verification does not contain the newest frozen production state");
+    validateChecks(candidate.checks, "final candidate checks");
+    if (iso(event.occurred_at, "final convergence event time") < iso(provenance.captured_at, "final provenance time")) fail("final convergence cannot be recorded before final provenance collection");
+    if (context.events.some((item) => item.type === "FINAL_CONVERGENCE")) fail("final convergence can be recorded only once");
   } else if (event.type === "CUTOVER") {
-    exactKeys(p, ["explicit", "approval_id", "route_provenance_state", "old_runtime_identity", "new_runtime_identity", "old_target", "new_target", "started_at", "completed_at", "old_stack_mode"], "cutover evidence");
+    exactKeys(p, ["explicit", "approval_id", "route_provenance_state", "old_runtime_identity", "new_runtime_identity", "old_target", "new_target", "started_at", "completed_at", "old_stack_mode", "freeze_token", "final_snapshot_id", "candidate_write_watermark"], "cutover evidence");
     if (p.explicit !== true || p.approval_id !== approval?.approval_id) fail("cutover requires the exact explicit manual approval");
     if (p.route_provenance_state !== "VERIFIED") fail("Cloudflare route provenance must be verified before cutover");
     if (p.old_runtime_identity !== plan.old_runtime.runtime_identity) fail("cutover old runtime identity mismatch");
-    const candidateEvent = context.events?.find?.((item) => item.type === "CANDIDATE_UP");
-    if (candidateEvent && p.new_runtime_identity !== candidateEvent.payload.runtime_identity) fail("cutover new runtime identity mismatch");
+    const freeze = context.events?.find?.((item) => item.type === "FREEZE")?.payload.adapter_evidence;
+    const convergence = context.events?.find?.((item) => item.type === "FINAL_CONVERGENCE")?.payload;
+    if (!freeze || !convergence) fail("cutover is blocked until authoritative freeze and final convergence complete");
+    if (p.new_runtime_identity !== convergence.final_candidate.runtime_identity) fail("cutover new runtime identity mismatch");
     if (p.old_target !== plan.old_runtime.route_target || p.new_target !== plan.candidate.route_target) fail("cutover route targets differ from the approved plan");
-    if (p.old_stack_mode !== "READ_ONLY_STOPPED") fail("old stack must become a read-only stopped rollback target");
-    if (!candidateEvent || p.started_at !== candidateEvent.payload.write_freeze_started_at) fail("cutover duration must begin at the production write freeze");
+    if (p.old_stack_mode !== "RETAINED_READ_ONLY_NOT_DATA_SAFE") fail("old stack must be retained read-only without being falsely classified as data-safe");
+    if (p.freeze_token !== freeze.freeze_token || p.started_at !== freeze.freeze_started_at) fail("cutover duration must begin at the authoritative runtime write freeze");
+    if (p.final_snapshot_id !== convergence.final_snapshot.snapshot_id) fail("cutover must bind the final frozen-current snapshot");
+    if (p.candidate_write_watermark !== convergence.final_snapshot.source_data_watermark) fail("candidate cutover watermark must equal the final frozen-current source watermark");
     const duration = iso(p.completed_at, "cutover.completed_at") - iso(p.started_at, "cutover.started_at");
     if (duration < 0 || duration > 600_000) fail("cutover exceeded the hard 10 minute interruption maximum");
   } else if (event.type === "COMPLETE") {
-    exactKeys(p, ["result"], "completion evidence");
+    exactKeys(p, ["result", "runtime_adapter", "adapter_evidence"], "completion evidence");
     if (p.result !== "SUCCESS") fail("completed release result must be SUCCESS");
+    if (p.runtime_adapter !== "dsdst-runtime-switch-v1") fail("post-cutover write watermark must come from the approved runtime adapter");
+    const evidence = verifyBoundEvidence(p.adapter_evidence, "post-cutover runtime adapter evidence");
+    exactKeys(evidence, ["action", "runtime_identity", "candidate_write_watermark", "observed_at", "status", "evidence_digest"], "post-cutover runtime adapter evidence");
+    const cutover = context.events?.find?.((item) => item.type === "CUTOVER");
+    if (!cutover || evidence.action !== "observe-candidate-write-watermark" || evidence.runtime_identity !== cutover.payload.new_runtime_identity || evidence.status !== "VERIFIED" || iso(evidence.observed_at, "candidate write watermark observed_at") < iso(cutover.payload.completed_at, "cutover completed_at")) fail("candidate write watermark after cutover is not authoritative");
+    string(evidence.candidate_write_watermark, "candidate write watermark after cutover");
   } else if (event.type === "FAIL") {
-    exactKeys(p, ["reason", "route_mutated"], "failure evidence");
+    const freeze = context.events?.find?.((item) => item.type === "FREEZE")?.payload.adapter_evidence;
+    exactKeys(p, freeze && state === "VERIFIED" ? ["reason", "route_mutated", "candidate_authoritative", "old_writes_resumed", "freeze_token", "old_runtime_identity", "route_target", "resume_evidence"] : ["reason", "route_mutated"], "failure evidence");
     string(p.reason, "failure.reason");
     if (p.route_mutated !== false && state !== "CUTOVER") fail("pre-cutover failure must prove the route was not mutated");
+    if (freeze && state === "VERIFIED") {
+      if (p.route_mutated !== false || p.candidate_authoritative !== false || p.old_writes_resumed !== true || p.freeze_token !== freeze.freeze_token || p.old_runtime_identity !== plan.old_runtime.runtime_identity || p.route_target !== plan.old_runtime.route_target) fail("failure after freeze must resume the old writer, keep candidate non-authoritative, and leave route unchanged");
+      const resume = verifyBoundEvidence(p.resume_evidence, "runtime resume adapter evidence");
+      exactKeys(resume, ["action", "freeze_token", "runtime_identity", "write_state", "evidence_digest"], "runtime resume adapter evidence");
+      if (resume.action !== "resume-old-writes" || resume.freeze_token !== freeze.freeze_token || resume.runtime_identity !== plan.old_runtime.runtime_identity || resume.write_state !== "ENABLED") fail("runtime adapter did not prove old production writes resumed");
+    }
   } else if (event.type === "ROLLBACK") {
-    exactKeys(p, ["explicit", "reason", "route_provenance_state", "from_runtime_identity", "restored_runtime_identity", "restored_target", "database_restore_used", "started_at", "completed_at"], "rollback evidence");
+    exactKeys(p, ["explicit", "reason", "route_provenance_state", "from_runtime_identity", "restored_runtime_identity", "restored_target", "database_restore_used", "started_at", "completed_at", "rollback_safety"], "rollback evidence");
     if (p.explicit !== true || p.route_provenance_state !== "VERIFIED") fail("rollback must be explicit and route provenance VERIFIED");
     string(p.reason, "rollback.reason");
     if (p.from_runtime_identity === p.restored_runtime_identity || p.restored_runtime_identity !== plan.old_runtime.runtime_identity) fail("rollback must restore the previous runtime identity");
     if (p.restored_target !== plan.old_runtime.route_target) fail("rollback must restore the previous route target");
     if (p.database_restore_used !== false) fail("automatic production database restore is forbidden during rollback");
+    const safety = object(p.rollback_safety, "rollback data safety evidence");
+    exactKeys(safety, ["mode", "status", "cutover_write_watermark", "candidate_write_watermark", "synchronization_id", "target_write_watermark", "preserves_candidate_writes"], "rollback data safety evidence");
+    const cutover = context.events?.find?.((item) => item.type === "CUTOVER");
+    if (!cutover || safety.status !== "VERIFIED" || safety.cutover_write_watermark !== cutover.payload.candidate_write_watermark) fail("rollback data safety proof is not bound to cutover");
+    if (safety.mode === "ZERO_CANONICAL_WRITES") {
+      if (safety.candidate_write_watermark !== safety.cutover_write_watermark || safety.synchronization_id !== null || safety.preserves_candidate_writes !== true) fail("zero-write rollback proof does not prove zero canonical candidate writes");
+    } else if (safety.mode === "CURRENT_STATE_SYNC") {
+      if (!safety.synchronization_id || safety.target_write_watermark !== safety.candidate_write_watermark || safety.preserves_candidate_writes !== true) fail("current-state rollback synchronization does not preserve all candidate-era writes");
+    } else fail("rollback is blocked without zero-write or verified current-state synchronization proof");
     const duration = iso(p.completed_at, "rollback.completed_at") - iso(p.started_at, "rollback.started_at");
     if (duration < 0 || duration > 600_000) fail("rollback exceeded the hard 10 minute interruption maximum");
-    const cutover = context.events?.find?.((item) => item.type === "CUTOVER");
     const retentionStart = cutover ? iso(cutover.payload.completed_at, "cutover.completed_at") : iso(plan.prepared_at, "prepared_at");
     if (iso(event.occurred_at, "rollback event time") > retentionStart + 7 * 24 * 60 * 60 * 1000) fail("seven-day rollback retention window has expired");
   }
@@ -447,7 +569,7 @@ function validateTransition(context) {
 function eventState(currentState, type) {
   return ({
     APPROVE: "APPROVED", PREFLIGHT_PASS: "PREFLIGHT_PASSED", CANDIDATE_UP: "CANDIDATE_UP",
-    VERIFY: "VERIFIED", CUTOVER: "CUTOVER", COMPLETE: "COMPLETED", FAIL: "FAILED", ROLLBACK: "ROLLED_BACK",
+    VERIFY: "VERIFIED", FREEZE: "VERIFIED", FINAL_CONVERGENCE: "VERIFIED", CUTOVER: "CUTOVER", COMPLETE: "COMPLETED", FAIL: "FAILED", ROLLBACK: "ROLLED_BACK",
   })[type] || fail(`unknown release event type ${type}`);
 }
 
@@ -527,8 +649,11 @@ export function buildReleaseReport(journalPath) {
   const preflight = findEvent(events, "PREFLIGHT_PASS")?.payload ?? null;
   const candidate = findEvent(events, "CANDIDATE_UP")?.payload ?? null;
   const verification = findEvent(events, "VERIFY")?.payload ?? null;
+  const freeze = findEvent(events, "FREEZE")?.payload.adapter_evidence ?? null;
+  const convergence = findEvent(events, "FINAL_CONVERGENCE")?.payload ?? null;
   const cutoverEvent = findEvent(events, "CUTOVER");
   const rollbackEvent = findEvent(events, "ROLLBACK");
+  const completion = findEvent(events, "COMPLETE")?.payload.adapter_evidence ?? null;
   const failure = findEvent(events, "FAIL")?.payload ?? null;
   const retentionStart = cutoverEvent ? iso(cutoverEvent.payload.completed_at, "cutover.completed_at") : iso(plan.prepared_at, "prepared_at");
   const availableUntil = new Date(retentionStart + 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -543,7 +668,7 @@ export function buildReleaseReport(journalPath) {
     target_met: Date.parse(cutoverEvent.payload.completed_at) - Date.parse(cutoverEvent.payload.started_at) <= 300_000,
   } : null;
   return {
-    evidence_version: "dsdst.runtime-release.v1",
+    evidence_version: "dsdst.runtime-release.v2",
     release_id: plan.release_id,
     release: plan.release,
     state: current.state,
@@ -552,22 +677,40 @@ export function buildReleaseReport(journalPath) {
     images: plan.services.map(({service_id, source_revision, image_reference, image_digest, image_id, config_fingerprint}) => ({service_id, source_revision, image_reference, image_digest, image_id, config_fingerprint})),
     approval,
     backup_id: preflight?.backup_id ?? plan.recovery_point.recovery_point_id,
-    migrations: candidate?.hydration?.migrations_ran ?? [],
+    migrations: convergence?.candidate_hydration?.migrations_ran ?? candidate?.hydration?.migrations_ran ?? [],
     migration_preflight: preflight?.migration ?? null,
     checks: verification ? {health: verification.critical_services, smoke: verification.smoke, connectivity: verification.connectivity, provenance: verification.provenance_check} : null,
+    write_freeze: freeze ? {
+      freeze_token: freeze.freeze_token,
+      started_at: freeze.freeze_started_at,
+      runtime_identity: freeze.runtime_identity,
+      source_data_watermark: freeze.source_data_watermark,
+    } : null,
+    final_convergence: convergence ? {
+      snapshot_id: convergence.final_snapshot.snapshot_id,
+      snapshot_hashes: convergence.final_snapshot.components.map(({authority, content_hash}) => ({authority, content_hash})),
+      source_data_watermark: convergence.final_snapshot.source_data_watermark,
+      hydration_snapshot_id: convergence.candidate_hydration.snapshot_id,
+      migrations: convergence.candidate_hydration.migrations_ran,
+      candidate_runtime_identity: convergence.final_candidate.runtime_identity,
+      schema_provenance: convergence.final_candidate.schema_provenance,
+      data_verification: convergence.final_candidate.data_verification,
+      checks: convergence.final_candidate.checks,
+    } : null,
     cutover,
+    candidate_write_watermark_after_cutover: completion ? {watermark: completion.candidate_write_watermark, observed_at: completion.observed_at, runtime_identity: completion.runtime_identity} : rollbackEvent ? {watermark: rollbackEvent.payload.rollback_safety.candidate_write_watermark, observed_at: rollbackEvent.payload.started_at, runtime_identity: rollbackEvent.payload.from_runtime_identity} : null,
     rollback: {
       available_until: availableUntil,
       retention_days: 7,
       retained_volume_ids: plan.old_runtime.volume_ids,
-      old_stack_mode: cutoverEvent ? cutoverEvent.payload.old_stack_mode : "PLANNED_READ_ONLY_STOPPED",
+      old_stack_mode: cutoverEvent ? cutoverEvent.payload.old_stack_mode : "PLANNED_RETAINED_READ_ONLY_NOT_DATA_SAFE",
       used: Boolean(rollbackEvent),
       result: rollbackEvent?.payload ?? null,
       automatic_database_restore: false,
     },
     runtime: {
       previous_identity: plan.old_runtime.runtime_identity,
-      candidate_identity: candidate?.runtime_identity ?? null,
+      candidate_identity: convergence?.final_candidate?.runtime_identity ?? candidate?.runtime_identity ?? null,
       current_identity: rollbackEvent ? rollbackEvent.payload.restored_runtime_identity : cutoverEvent ? cutoverEvent.payload.new_runtime_identity : plan.old_runtime.runtime_identity,
     },
     failure,
