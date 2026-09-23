@@ -727,7 +727,10 @@ test("production and candidate Compose declarations hard-bind published ports to
   assert.equal((production.match(/127\.0\.0\.1:\$\{/g) || []).length, 5);
   assert.equal((candidate.match(/127\.0\.0\.1:\$\{/g) || []).length, 5);
   assert.doesNotMatch(candidate, /\$\{(?:PANEL|KIT_STUDIO|LABEL_PRINTER|CUSTOMER_HUB)_DATA_DIR/);
-  assert.match(candidate, /candidate_label_data:\/app\/data:ro/);
+  assert.match(
+    candidate,
+    /source:\s*candidate_label_data[\s\S]{0,160}target:\s*\/app\/data[\s\S]{0,120}read_only:\s*true/,
+  );
   assert.match(candidate, /RELEASE_CANDIDATE_PROJECT[^\n]*-internal[\s\S]*internal: true/);
 });
 
