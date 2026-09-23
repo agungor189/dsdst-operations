@@ -131,7 +131,8 @@ test("Warehouse exposes only the V2-07 Panel BFF contract and retains no invento
   const server = fs.readFileSync(path.join(warehouseRoot, "server", "app.ts"), "utf8");
   const client = fs.readFileSync(path.join(warehouseRoot, "src", "lib", "api.ts"), "utf8");
   assert.match(server, /\/inventory\/reservations\/\$\{encodeURIComponent\(String\(req\.params\.id\)\)\}\/fulfillment/);
-  assert.match(server, /\/inventory\/reservations\/\$\{encodeURIComponent\(String\(req\.params\.id\)\)\}\/dispatch/);
+  assert.match(server, /PHYSICAL_HANDOFF_REQUIRED/);
+  assert.doesNotMatch(client, /async dispatch\(/);
   assert.match(server, /idempotency_key: safeQueryText\(req\.body\?\.idempotency_key/);
   assert.match(client, /reportDiscrepancy/);
   assert.doesNotMatch(server, /better-sqlite3|UPDATE\s+products\s+SET\s+central_stock|inventory_ledger_events/i);
