@@ -281,6 +281,8 @@ try {
     "--mount",
     `type=volume,src=${project}-panel-uploads,dst=/target/panel-uploads`,
     "--mount",
+    `type=volume,src=${project}-panel-backups,dst=/target/panel-backups`,
+    "--mount",
     `type=volume,src=${project}-kit-data,dst=/target/kit-data`,
     "--mount",
     `type=volume,src=${project}-kit-uploads,dst=/target/kit-uploads`,
@@ -288,6 +290,8 @@ try {
     `type=volume,src=${project}-label-data,dst=/target/label-data`,
     "--mount",
     `type=volume,src=${project}-customer-hub-data,dst=/target/customer-hub-data`,
+    "--mount",
+    `type=volume,src=${project}-customer-hub-backups,dst=/target/customer-hub-backups`,
 
     "--mount",
     `type=bind,src=${path.join(ROOT, "scripts")},dst=/operations/scripts,readonly`,

@@ -460,5 +460,18 @@ test("normal V2-18 hydration is isolated to candidate volumes and runs migration
   assert.match(wrapper, /--candidate-env "\$ENV_FILE"/);
 
   assert.match(copier, /Candidate target is not empty/);
+  assert.match(copier, /chmod 0750/);
+  assert.match(copier, /chmod 0640/);
+  assert.match(copier, /panel-backups/);
+  assert.match(copier, /customer-hub-backups/);
   assert.doesNotMatch(copier, /bootstrap-seed-service-keys/);
+
+  const stack = fs.readFileSync(
+    path.join(root, "scripts/release/candidate-stack.sh"),
+    "utf8"
+  );
+
+  assert.match(stack, /HYDRATION_EVIDENCE=\$\{4:-\}/);
+  assert.match(stack, /Candidate up requires verified hydration evidence/);
+  assert.match(stack, /verify-hydration-evidence\.mjs/);
 });
