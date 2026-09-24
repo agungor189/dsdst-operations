@@ -38,6 +38,7 @@ trap cleanup EXIT INT TERM
   --project "$PROJECT" \
   --isolated-restore "$ISOLATED_RESTORE" \
   --backup-id "$BACKUP_ID" \
+  --candidate-env "$ENV_FILE" \
   --forbid-production-volumes \
   >"$TEMP_EVIDENCE"
 node "$ROOT_DIR/scripts/release/verify-hydration-evidence.mjs" "$TEMP_EVIDENCE" "$BACKUP_ID" >/dev/null
