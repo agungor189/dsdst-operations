@@ -49,12 +49,30 @@ mkdir -p /target/customer-hub-data/attachments
 cp -R "$RESTORED_ROOT/customer-hub/data/attachments/." \
   /target/customer-hub-data/attachments/
 
-chown -R "${TARGET_UID}:${TARGET_GID}" \
+# Recovery artifacts are intentionally read-only. Candidate runtime state must
+# become writable only inside the isolated candidate volumes.
+for dir in \
   /target/panel-data \
   /target/panel-uploads \
+  /target/panel-backups \
   /target/kit-data \
   /target/kit-uploads \
   /target/label-data \
-  /target/customer-hub-data
+  /target/customer-hub-data \
+  /target/customer-hub-backups
+do
+  find "$dir" -type d -exec chmod 0750 {} +
+  find "$dir" -type f -exec chmod 0640 {} +
+done
+
+chown -R "${TARGET_UID}:${TARGET_GID}" \
+  /target/panel-data \
+  /target/panel-uploads \
+  /target/panel-backups \
+  /target/kit-data \
+  /target/kit-uploads \
+  /target/label-data \
+  /target/customer-hub-data \
+  /target/customer-hub-backups
 
 echo "Candidate release hydration completed."

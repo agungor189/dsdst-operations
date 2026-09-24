@@ -5,9 +5,10 @@ ROOT_DIR=$(CDPATH='' && cd -- "$(dirname -- "$0")/../.." && pwd)
 ACTION=${1:-}
 JOURNAL=${2:-}
 ENV_FILE=${3:-}
+HYDRATION_EVIDENCE=${4:-}
 
 if [ -z "$ACTION" ] || [ -z "$JOURNAL" ] || [ -z "$ENV_FILE" ]; then
-  echo "Usage: $0 <config|pull|up|health|stop> <release-journal> <candidate-env-file>" >&2
+  echo "Usage: $0 <config|pull|up|health|stop> <release-journal> <candidate-env-file> [hydration-evidence]" >&2
   exit 2
 fi
 
@@ -28,6 +29,16 @@ case "$ACTION" in
     ;;
   up)
     node "$ROOT_DIR/scripts/release/release-cli.mjs" assert-state "$JOURNAL" PREFLIGHT_PASSED >/dev/null
+    [ -n "$HYDRATION_EVIDENCE" ] || {
+      echo "Candidate up requires verified hydration evidence" >&2
+      exit 2
+    }
+    [ -f "$HYDRATION_EVIDENCE" ] || {
+      echo "Hydration evidence does not exist: $HYDRATION_EVIDENCE" >&2
+      exit 2
+    }
+    BACKUP_ID=$(node "$ROOT_DIR/scripts/release/release-cli.mjs" backup-id "$JOURNAL")
+    node "$ROOT_DIR/scripts/release/verify-hydration-evidence.mjs"       "$HYDRATION_EVIDENCE" "$BACKUP_ID" >/dev/null
     "$@" config --quiet
     "$@" up -d --no-build --remove-orphans
     ;;
