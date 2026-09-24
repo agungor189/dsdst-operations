@@ -267,6 +267,7 @@ services:
       - ${CUSTOMER_HUB_DATA_DIR:-customer_hub_data}:/sources/customer-hub-data:ro
       - ${OPERATIONS_BACKUP_DIR:-./backups}:/backups
       - ./scripts:/operations/scripts:ro
+      - ./config:/operations/config:ro
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     command: ["true"]

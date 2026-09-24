@@ -94,6 +94,7 @@ docker run --rm --env-file "$ENV_FILE" \
   -e "RECOVERY_ID=$RECOVERY_ID" \
   --mount "type=bind,src=${BACKUP_ROOT},dst=/backups" \
   --mount "type=bind,src=${ROOT_DIR}/scripts,dst=/operations/scripts,readonly" \
+  --mount "type=bind,src=${ROOT_DIR}/config,dst=/operations/config,readonly" \
   "$TOOLBOX_IMAGE" sh /operations/scripts/recovery/offsite-upload.sh
 
 node --no-warnings "$ROOT_DIR/scripts/recovery/recovery-cli.mjs" verify --require-accepted "$FINAL" >/dev/null
