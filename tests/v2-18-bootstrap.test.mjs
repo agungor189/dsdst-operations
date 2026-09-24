@@ -429,3 +429,36 @@ test('recovery toolbox always has canonical source-set config mounted read-only'
     /src=\$\{ROOT_DIR\}\/config,dst=\/operations\/config,readonly/,
   );
 });
+
+test("normal V2-18 hydration is isolated to candidate volumes and runs migrations only there", () => {
+  const root = new URL("..", import.meta.url).pathname;
+
+  const adapter = fs.readFileSync(
+    path.join(root, "scripts/release/adapters/candidate-hydration.mjs"),
+    "utf8"
+  );
+
+  const wrapper = fs.readFileSync(
+    path.join(root, "scripts/release/hydrate-candidate.sh"),
+    "utf8"
+  );
+
+  const copier = fs.readFileSync(
+    path.join(root, "scripts/release/adapters/hydrate-candidate-volumes.sh"),
+    "utf8"
+  );
+
+  assert.match(adapter, /--forbid-production-volumes/);
+  assert.match(adapter, /\$\{project\}-panel-data/);
+  assert.match(adapter, /\$\{project\}-kit-data/);
+  assert.match(adapter, /\$\{project\}-label-data/);
+  assert.match(adapter, /\$\{project\}-customer-hub-data/);
+
+  assert.match(adapter, /runMigrations/);
+  assert.match(adapter, /dist-server\/server\/db\/migrate-cli\.js/);
+
+  assert.match(wrapper, /--candidate-env "\$ENV_FILE"/);
+
+  assert.match(copier, /Candidate target is not empty/);
+  assert.doesNotMatch(copier, /bootstrap-seed-service-keys/);
+});
