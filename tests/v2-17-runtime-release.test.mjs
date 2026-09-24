@@ -840,3 +840,35 @@ test("14c. V2-18 legacy runtime bridge rejects missing or tampered identity evid
     /volume identities|bootstrap evidence/i
   );
 });
+
+test("14d. V2-18 allows distinct Label and renderer config fingerprints while keeping shared image provenance", () => {
+  const plan = v218ReleasePlan();
+
+  const label = plan.services.find(
+    (service) => service.service_id === "label-printer"
+  );
+  const renderer = plan.services.find(
+    (service) => service.service_id === "warehouse-label-renderer"
+  );
+
+  renderer.config_fingerprint = `sha256:${"d".repeat(64)}`;
+
+  assert.notEqual(
+    label.config_fingerprint,
+    renderer.config_fingerprint
+  );
+
+  assert.doesNotThrow(() =>
+    prepareRelease(tempJournal(), plan)
+  );
+
+  const badImage = v218ReleasePlan();
+  badImage.services.find(
+    (service) => service.service_id === "warehouse-label-renderer"
+  ).image_digest = `sha256:${"0".repeat(64)}`;
+
+  assert.throws(
+    () => prepareRelease(tempJournal(), badImage),
+    /Label Printer|renderer|image|digest|provenance/i
+  );
+});
