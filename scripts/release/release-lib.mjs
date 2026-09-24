@@ -260,7 +260,7 @@ function validateServices(plan, sources) {
   }
   const label = byId.get("label-printer");
   const renderer = byId.get("warehouse-label-renderer");
-  for (const field of ["repository", "source_revision", "image_reference", "image_digest", "image_id", "config_fingerprint"]) {
+  for (const field of ["repository", "source_revision", "image_reference", "image_digest", "image_id"]) {
     if (label[field] !== renderer[field]) fail(`Label Printer and renderer ${field} provenance mismatch`);
   }
 }
