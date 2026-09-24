@@ -46,6 +46,73 @@ function tempJournal() {
   return path.join(directory, "release.ndjson");
 }
 
+function v218LegacyOldRuntime() {
+  const volumes = {
+    panel: `sha256:${"7".repeat(64)}`,
+    kit: `sha256:${"8".repeat(64)}`,
+    hub: `sha256:${"9".repeat(64)}`,
+    label: `sha256:${"a".repeat(64)}`,
+  };
+
+  const services = [
+    {
+      service_id: "dsdst-panel",
+      container_id: "1".repeat(64),
+      image_id: `sha256:${"b".repeat(64)}`,
+      mounts: [{target: "/data", mode: "rw", type: "volume", source_id: volumes.panel}],
+    },
+    {
+      service_id: "dsdst-warehouse",
+      container_id: "2".repeat(64),
+      image_id: `sha256:${"c".repeat(64)}`,
+      mounts: [],
+    },
+    {
+      service_id: "dsdst-kit-studio",
+      container_id: "3".repeat(64),
+      image_id: `sha256:${"d".repeat(64)}`,
+      mounts: [{target: "/data", mode: "rw", type: "volume", source_id: volumes.kit}],
+    },
+    {
+      service_id: "dsdst-customer-hub",
+      container_id: "4".repeat(64),
+      image_id: `sha256:${"e".repeat(64)}`,
+      mounts: [{target: "/data", mode: "rw", type: "volume", source_id: volumes.hub}],
+    },
+    {
+      service_id: "label-printer",
+      container_id: "5".repeat(64),
+      image_id: `sha256:${"f".repeat(64)}`,
+      mounts: [{target: "/app/data", mode: "rw", type: "volume", source_id: volumes.label}],
+    },
+    {
+      service_id: "warehouse-label-renderer",
+      container_id: "6".repeat(64),
+      image_id: `sha256:${"f".repeat(64)}`,
+      mounts: [{target: "/app/data", mode: "ro", type: "volume", source_id: volumes.label}],
+    },
+  ];
+
+  const body = {
+    kind: "legacy-bootstrap-runtime",
+    bootstrap_id: "bootstrap-v2-18-fixture",
+    captured_at: "2026-09-23T11:55:00.000Z",
+    source_provenance_state: "UNVERIFIED_LEGACY",
+    source_revision_claimed: false,
+    services,
+  };
+
+  const evidence_digest = createEvidenceDigest(body);
+
+  return {
+    project: "dsdst-production",
+    runtime_identity: `legacy-runtime-${evidence_digest.slice("sha256:".length)}`,
+    route_target: "http://127.0.0.1:3000",
+    volume_ids: Object.values(volumes),
+    identity_evidence: {...body, evidence_digest},
+  };
+}
+
 function releasePlan(overrides = {}) {
   const preparedAt = "2026-09-23T12:00:00.000Z";
   const imageDigits = ["1", "2", "3", "4", "5", "5"];
@@ -140,6 +207,7 @@ function v218ReleasePlan(overrides = {}) {
     source_repositories: v218.repositories.map(({id, revision}) => ({id, revision})),
   };
   plan.candidate.project = "dsdst-candidate-v2-18-20260923t120000z";
+  plan.old_runtime = v218LegacyOldRuntime();
   return {...plan, ...overrides};
 }
 
@@ -232,12 +300,12 @@ function advanceToVerified(journal, plan = releasePlan()) {
   append(journal, "VERIFY", verificationPayload({}, plan), "2026-09-23T12:04:00.000Z");
 }
 
-function freezePayload(overrides = {}) {
+function freezePayload(overrides = {}, plan = releasePlan()) {
   const body = {
     action: "freeze-writes",
     freeze_token: "freeze-runtime-0001",
     freeze_started_at: "2026-09-23T12:05:00.000Z",
-    runtime_identity: OLD_RUNTIME,
+    runtime_identity: plan.old_runtime.runtime_identity,
     source_data_watermark: "canonical-write-1042",
     write_state: "FROZEN",
     ...overrides,
@@ -281,7 +349,7 @@ function finalConvergencePayload(overrides = {}, plan = releasePlan()) {
 
 function advanceToConverged(journal, plan = releasePlan()) {
   advanceToVerified(journal, plan);
-  append(journal, "FREEZE", freezePayload(), "2026-09-23T12:05:10.000Z");
+  append(journal, "FREEZE", freezePayload({}, plan), "2026-09-23T12:05:10.000Z");
   append(journal, "FINAL_CONVERGENCE", finalConvergencePayload({}, plan), "2026-09-23T12:06:40.000Z");
 }
 
@@ -292,7 +360,7 @@ function routeIntentPayload(action, overrides = {}, plan = releasePlan()) {
     action,
     expected_target: rollback ? plan.candidate.route_target : plan.old_runtime.route_target,
     desired_target: rollback ? plan.old_runtime.route_target : plan.candidate.route_target,
-    old_runtime_identity: OLD_RUNTIME,
+    old_runtime_identity: plan.old_runtime.runtime_identity,
     new_runtime_identity: finalConvergencePayload({}, plan).final_candidate.runtime_identity,
     freeze_token: "freeze-runtime-0001",
     final_snapshot_id: "cutover-snapshot-1042",
@@ -311,7 +379,7 @@ function routeObservation(intent, target, observedAt) {
 }
 
 function authorityEvidence(intent, oldAuthoritative, candidateAuthoritative, plan = releasePlan()) {
-  const body = {operation_id: intent.operation_id, old_runtime_identity: OLD_RUNTIME, candidate_runtime_identity: finalConvergencePayload({}, plan).final_candidate.runtime_identity, old_authoritative: oldAuthoritative, candidate_authoritative: candidateAuthoritative};
+  const body = {operation_id: intent.operation_id, old_runtime_identity: plan.old_runtime.runtime_identity, candidate_runtime_identity: finalConvergencePayload({}, plan).final_candidate.runtime_identity, old_authoritative: oldAuthoritative, candidate_authoritative: candidateAuthoritative};
   return {...body, evidence_digest: createEvidenceDigest(body)};
 }
 
@@ -320,7 +388,7 @@ function cutoverPayload(intent, overrides = {}, plan = releasePlan()) {
     operation_id: intent.operation_id, explicit: true, approval_id: "approval-17", route_provenance_state: "VERIFIED",
     route_observation: routeObservation(intent, intent.desired_target, "2026-09-23T12:07:00.000Z"),
     authority_evidence: authorityEvidence(intent, false, true, plan),
-    old_runtime_identity: OLD_RUNTIME, new_runtime_identity: finalConvergencePayload({}, plan).final_candidate.runtime_identity,
+    old_runtime_identity: plan.old_runtime.runtime_identity, new_runtime_identity: finalConvergencePayload({}, plan).final_candidate.runtime_identity,
     old_target: plan.old_runtime.route_target, new_target: plan.candidate.route_target,
     started_at: "2026-09-23T12:05:00.000Z", completed_at: "2026-09-23T12:07:00.000Z",
     old_stack_mode: "RETAINED_READ_ONLY_NOT_DATA_SAFE", freeze_token: "freeze-runtime-0001",
@@ -341,7 +409,7 @@ function rollbackPayload(intent, overrides = {}, plan = releasePlan()) {
     operation_id: intent.operation_id, explicit: true, reason: "post-cutover health regression", route_provenance_state: "VERIFIED",
     route_observation: routeObservation(intent, intent.desired_target, "2026-09-23T12:10:00.000Z"),
     authority_evidence: authorityEvidence(intent, true, false, plan),
-    from_runtime_identity: finalConvergencePayload({}, plan).final_candidate.runtime_identity, restored_runtime_identity: OLD_RUNTIME,
+    from_runtime_identity: finalConvergencePayload({}, plan).final_candidate.runtime_identity, restored_runtime_identity: plan.old_runtime.runtime_identity,
     restored_target: plan.old_runtime.route_target, database_restore_used: false,
     started_at: intent.started_at, completed_at: "2026-09-23T12:10:00.000Z",
     rollback_safety: intent.rollback_safety,
@@ -496,7 +564,7 @@ test("14a. exact V2-18 plan runs prepare through cutover and rollback with V2-18
   assert.equal(report.release, "V2-18");
   assert.equal(report.backup_id, "rp-v2-18-fixture");
   assert.equal(report.state, "ROLLED_BACK");
-  assert.equal(report.runtime.current_identity, OLD_RUNTIME);
+  assert.equal(report.runtime.current_identity, plan.old_runtime.runtime_identity);
 });
 
 test("14b. V2-18 rejects the wrong prior closure, source set, or recovery release", () => {
@@ -748,4 +816,27 @@ test("candidate state requires collector-bound provenance", () => {
   const candidate = candidatePayload();
   delete candidate.runtime_provenance;
   assert.throws(() => append(journal, "CANDIDATE_UP", candidate, "2026-09-23T12:03:00.000Z"), /collector|provenance/i);
+});
+
+test("14c. V2-18 legacy runtime bridge rejects missing or tampered identity evidence", () => {
+  const missing = v218ReleasePlan();
+  delete missing.old_runtime.identity_evidence;
+  assert.throws(
+    () => prepareRelease(tempJournal(), missing),
+    /legacy old runtime identity evidence|object/i
+  );
+
+  const tampered = v218ReleasePlan();
+  tampered.old_runtime.identity_evidence.source_provenance_state = "VERIFIED";
+  assert.throws(
+    () => prepareRelease(tempJournal(), tampered),
+    /bound|UNVERIFIED_LEGACY/i
+  );
+
+  const wrongVolume = v218ReleasePlan();
+  wrongVolume.old_runtime.volume_ids[0] = `sha256:${"0".repeat(64)}`;
+  assert.throws(
+    () => prepareRelease(tempJournal(), wrongVolume),
+    /volume identities|bootstrap evidence/i
+  );
 });

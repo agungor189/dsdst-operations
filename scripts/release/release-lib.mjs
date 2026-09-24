@@ -265,13 +265,154 @@ function validateServices(plan, sources) {
   }
 }
 
+function validateLegacyOldRuntime(oldRuntime) {
+  const evidence = verifyBoundEvidence(
+    oldRuntime.identity_evidence,
+    "legacy old runtime identity evidence"
+  );
+
+  exactKeys(evidence, [
+    "kind",
+    "bootstrap_id",
+    "captured_at",
+    "source_provenance_state",
+    "source_revision_claimed",
+    "services",
+    "evidence_digest",
+  ], "legacy old runtime identity evidence");
+
+  if (evidence.kind !== "legacy-bootstrap-runtime") {
+    fail("legacy old runtime identity evidence kind is invalid");
+  }
+  if (!/^bootstrap-[A-Za-z0-9._-]+$/.test(evidence.bootstrap_id)) {
+    fail("legacy bootstrap ID is invalid");
+  }
+
+  iso(evidence.captured_at, "legacy runtime captured_at");
+
+  if (
+    evidence.source_provenance_state !== "UNVERIFIED_LEGACY" ||
+    evidence.source_revision_claimed !== false
+  ) {
+    fail("legacy runtime must remain explicitly UNVERIFIED_LEGACY");
+  }
+
+  const required = new Set(REQUIRED_SERVICES.keys());
+  const observed = new Set();
+  const volumeIds = [];
+  let labelState = null;
+  let rendererState = null;
+
+  for (const service of array(evidence.services, "legacy runtime services")) {
+    exactKeys(
+      service,
+      ["service_id", "container_id", "image_id", "mounts"],
+      "legacy runtime service"
+    );
+
+    if (
+      !required.has(service.service_id) ||
+      observed.has(service.service_id)
+    ) {
+      fail("legacy runtime service set is invalid");
+    }
+    observed.add(service.service_id);
+
+    if (!/^[a-f0-9]{64}$/.test(service.container_id)) {
+      fail("legacy runtime container identity is invalid");
+    }
+    digest(service.image_id, "legacy runtime image identity");
+
+    for (const mount of array(
+      service.mounts,
+      `${service.service_id}.legacy mounts`
+    )) {
+      exactKeys(
+        mount,
+        ["target", "mode", "type", "source_id"],
+        `${service.service_id}.legacy mount`
+      );
+
+      if (
+        typeof mount.target !== "string" ||
+        !mount.target.startsWith("/")
+      ) fail("legacy runtime mount target is invalid");
+
+      if (!["ro", "rw"].includes(mount.mode)) {
+        fail("legacy runtime mount mode is invalid");
+      }
+      if (!["volume", "bind"].includes(mount.type)) {
+        fail("legacy runtime mount type is invalid");
+      }
+
+      digest(mount.source_id, "legacy runtime volume identity");
+      volumeIds.push(mount.source_id);
+
+      if (
+        service.service_id === "label-printer" &&
+        mount.target === "/app/data"
+      ) labelState = mount.source_id;
+
+      if (
+        service.service_id === "warehouse-label-renderer" &&
+        mount.target === "/app/data"
+      ) rendererState = mount.source_id;
+    }
+  }
+
+  if (observed.size !== required.size) {
+    fail("legacy runtime evidence is missing critical services");
+  }
+
+  if (!labelState || labelState !== rendererState) {
+    fail("legacy Label Printer and renderer state identity mismatch");
+  }
+
+  const expectedIdentity =
+    `legacy-runtime-${evidence.evidence_digest.slice("sha256:".length)}`;
+
+  if (oldRuntime.runtime_identity !== expectedIdentity) {
+    fail("legacy runtime identity is not bound to bootstrap evidence");
+  }
+
+  const plannedVolumes = [...array(
+    oldRuntime.volume_ids,
+    "old_runtime.volume_ids"
+  )].sort();
+
+  const observedVolumes = [...new Set(volumeIds)].sort();
+
+  if (canonical(plannedVolumes) !== canonical(observedVolumes)) {
+    fail("legacy runtime volume identities do not match bootstrap evidence");
+  }
+}
+
 function validateTopology(plan) {
   const oldRuntime = object(plan.old_runtime, "old_runtime");
   const candidate = object(plan.candidate, "candidate");
-  exactKeys(oldRuntime, ["project", "runtime_identity", "route_target", "volume_ids"], "old_runtime");
+
+  if (plan.release === "V2-18") {
+    exactKeys(
+      oldRuntime,
+      ["project", "runtime_identity", "route_target", "volume_ids", "identity_evidence"],
+      "old_runtime"
+    );
+    validateLegacyOldRuntime(oldRuntime);
+  } else {
+    exactKeys(
+      oldRuntime,
+      ["project", "runtime_identity", "route_target", "volume_ids"],
+      "old_runtime"
+    );
+    if (!/^runtime-[a-f0-9]{64}$/.test(
+      string(oldRuntime.runtime_identity, "old_runtime.runtime_identity")
+    )) {
+      fail("old runtime identity must be a PR01 collector capture identity");
+    }
+  }
+
   exactKeys(candidate, ["project", "route_target", "host_bindings", "volume_ids"], "candidate");
   string(oldRuntime.project, "old_runtime.project");
-  if (!/^runtime-[a-f0-9]{64}$/.test(string(oldRuntime.runtime_identity, "old_runtime.runtime_identity"))) fail("old runtime identity must be a PR01 collector capture identity");
   string(oldRuntime.route_target, "old_runtime.route_target");
   string(candidate.project, "candidate.project");
   if (candidate.project === oldRuntime.project) fail("candidate must use a separate Compose project");
