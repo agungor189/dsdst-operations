@@ -77,6 +77,7 @@ test("operator choice, N packages and measurement precedence fail closed without
 
 test("verified official SDK flow polls bound shipments and disables side-effect retries for uncertain mutations", () => {
   const service = readPanel("server", "modules", "shipping", "geliverFlowService.ts");
+  const shopify = readPanel("server", "modules", "channels", "shopifyGatewayTransport.ts");
   const packageJson = JSON.parse(readPanel("package.json"));
   assert.equal(packageJson.dependencies["@geliver/sdk"], "1.3.0");
   assert.match(service, /officialDocumentation:\s*"https:\/\/docs\.geliver\.io"/);
@@ -96,6 +97,12 @@ test("verified official SDK flow polls bound shipments and disables side-effect 
   assert.match(service, /intervalMs\s*\?\?\s*1_000/);
   assert.match(service, /timeoutMs\s*\?\?\s*12_000/);
   assert.match(service, /this\.transport\.get\(providerShipmentId\)/);
+  assert.match(service, /this\.transport\.listDistricts/);
+  assert.match(service, /GELIVER_GEO_DISTRICT_AMBIGUOUS/);
+  assert.match(service, /RECIPIENT_ADDRESS_INCOMPLETE/);
+  assert.doesNotMatch(service, /address1\.split\(","\)/);
+  assert.match(shopify, /mapShopifyRecipient/);
+  assert.match(shopify, /turkishAddress && province && !sameArea/);
   assert.match(service, /if \(offerCount > 0\)/);
   assert.match(service, /return statusCode === "GOT_OFFERS"/);
   assert.doesNotMatch(service, /percentageCompleted\s*>=\s*100/);
@@ -177,6 +184,10 @@ test("Warehouse is a whitelisted live-offer operator client with structured pack
   assert.match(page, /Teklifler henüz hazır değil/);
   assert.match(page, /Teklifleri Yenile/);
   assert.match(page, /offerPollingState===\"COMPLETE_EMPTY\"/);
+  assert.match(page, /Ağırlık \(kg\)/);
+  assert.match(page, /kilogramsToGrams/);
+  assert.match(page, /providerCanResolveTurkishDistrict/);
+  assert.doesNotMatch(page, /Ağırlık \(gram\)/);
   assert.match(page, /İptal et/);
   assert.match(page, /Fiziksel teslimi doğrula/);
   assert.doesNotMatch(page, /packagesJson|carrierCode|serviceCode|quoteId|providerShipmentId/);
