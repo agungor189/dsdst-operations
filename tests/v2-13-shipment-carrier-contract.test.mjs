@@ -75,7 +75,7 @@ test("operator choice, N packages and measurement precedence fail closed without
   assert.match(service, /package numbers must be unique and consecutive/i);
 });
 
-test("verified official SDK flow disables side-effect retries and reconciles uncertain create/accept outcomes", () => {
+test("verified official SDK flow polls bound shipments and disables side-effect retries for uncertain mutations", () => {
   const service = readPanel("server", "modules", "shipping", "geliverFlowService.ts");
   const packageJson = JSON.parse(readPanel("package.json"));
   assert.equal(packageJson.dependencies["@geliver/sdk"], "1.3.0");
@@ -92,6 +92,13 @@ test("verified official SDK flow disables side-effect retries and reconciles unc
   assert.match(service, /create will not be retried automatically/);
   assert.match(service, /acceptOffer will not be retried automatically/);
   assert.match(service, /productPaymentOnDelivery:\s*false/);
+  assert.match(service, /pollProviderShipment/);
+  assert.match(service, /intervalMs\s*\?\?\s*1_000/);
+  assert.match(service, /timeoutMs\s*\?\?\s*12_000/);
+  assert.match(service, /this\.transport\.get\(providerShipmentId\)/);
+  assert.match(service, /if \(offerCount > 0\)/);
+  assert.match(service, /GELIVER_PROVIDER_FAILED/);
+  assert.match(service, /event:\s*"geliver\.offer_poll"/);
 });
 
 test("tracking is nullable and refreshable while provider-native labels carry no invented print-media metadata", () => {
@@ -133,7 +140,7 @@ test("V2-12 durably claims and processes shipment tracking/status only through v
   assert.match(gateway, /channel_shipment_outbound_attempts/);
   assert.match(gateway, /CHANNEL_TRACKING_PENDING/);
   assert.match(gateway, /CHANNEL_SHIPMENT_MAPPING_UNVERIFIED/);
-  assert.match(gateway, /providerMutationId = `trendyol:alternative-delivery:/);
+  assert.match(gateway, /providerMutationId\s*=\s*`trendyol:alternative-delivery:/);
   assert.match(gateway, /HEPSIBURADA:[\s\S]*enabledTransport: false/);
   assert.match(gateway, /N11:[\s\S]*enabledTransport: false/);
   assert.match(gateway, /SHOPIFY:[\s\S]*enabledTransport: false/);
@@ -162,6 +169,10 @@ test("Warehouse is a whitelisted live-offer operator client with structured pack
   assert.match(client, /acceptGeliverOffer/);
   assert.match(page, /Canlı Geliver teklifleri/);
   assert.match(page, /En ucuz teklif otomatik seçilmez/);
+  assert.match(page, /Kargo teklifleri hazırlanıyor/);
+  assert.match(page, /Teklifler henüz hazır değil/);
+  assert.match(page, /Teklifleri Yenile/);
+  assert.match(page, /offerPollingState===\"COMPLETE_EMPTY\"/);
   assert.match(page, /İptal et/);
   assert.match(page, /Fiziksel teslimi doğrula/);
   assert.doesNotMatch(page, /packagesJson|carrierCode|serviceCode|quoteId|providerShipmentId/);
