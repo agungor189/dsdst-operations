@@ -97,8 +97,12 @@ test("verified official SDK flow polls bound shipments and disables side-effect 
   assert.match(service, /timeoutMs\s*\?\?\s*12_000/);
   assert.match(service, /this\.transport\.get\(providerShipmentId\)/);
   assert.match(service, /if \(offerCount > 0\)/);
+  assert.match(service, /return statusCode === "GOT_OFFERS"/);
+  assert.doesNotMatch(service, /percentageCompleted\s*>=\s*100/);
   assert.match(service, /GELIVER_PROVIDER_FAILED/);
   assert.match(service, /event:\s*"geliver\.offer_poll"/);
+  for (const field of ["percentageCompleted", "hasError", "lastErrorCode", "lastErrorMessage"])
+    assert.match(service, new RegExp(`${field}:`));
 });
 
 test("tracking is nullable and refreshable while provider-native labels carry no invented print-media metadata", () => {
